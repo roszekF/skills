@@ -38,7 +38,7 @@ For the acquiescence measure, every persona gets the same four yes/no questions 
 
 ## Stance behaviour
 
-- `validate` — the persona answers from what the running product or prototype actually showed them in the walkthrough, not from the brief's promises.
+- `validate` — interview answers stay grounded in the persona's sourced passages, not in the brief's promises. The later walkthrough records friction only from the running product or prototype states the main agent actually observes.
 - `simulate` — every answer ends with *to confirm with: {role, question}*; the consolidated interview plan is the deliverable.
 - `adversary` — after each answer the persona adds "and here is why I would still not switch"; the objection must come from the persona's material or be marked assumption. A persona's interview with no objections is re-run with the persona instructed to refuse the product; a whole run in which every persona agreed is discarded.
 

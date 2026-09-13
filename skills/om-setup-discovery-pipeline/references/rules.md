@@ -17,4 +17,4 @@ Canonical rules shared by every skill in this collection. They always apply, in 
 
 - **Additive, marked, reversible.** Everything this skill writes into an existing file sits between its markers, so removing the layer is deleting the marked blocks and the `discovery` key. Say so in the report the first time.
 - **No tracker, no claims, no labels.** This skill touches files only; it names no tracker operation and applies no label.
-- **One source of truth for the template.** The blocks are rendered from `om-setup-agent-pipeline/references/sdlc-template.md`; never paraphrase them here or keep a second copy.
+- **Standalone template.** Render only this skill's own `references/sdlc-template.md`. It is intentionally synchronized with the delivery setup template in the collection source so a single-skill installation remains executable; never reach into a sibling skill's `references/` directory at runtime.

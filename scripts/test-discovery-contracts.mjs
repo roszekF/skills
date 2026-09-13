@@ -14,6 +14,7 @@ const discover = read("skills/om-discover/SKILL.md");
 const briefTemplate = read("skills/om-discover/references/brief-template.md");
 const reportTemplates = read("skills/om-discover/references/report-templates.md");
 const sdlcTemplate = read("skills/om-setup-agent-pipeline/references/sdlc-template.md");
+const discoverySdlcTemplate = read("skills/om-setup-discovery-pipeline/references/sdlc-template.md");
 const autoFix = read("skills/om-auto-fix-issue/SKILL.md");
 const autoFixTriage = read("skills/om-auto-fix-issue/references/fr-triage.md");
 const manageIssues = read("skills/om-auto-manage-issues/SKILL.md");
@@ -23,7 +24,17 @@ const readme = read("README.md");
 const skillDocs = read("docs/skills/README.md");
 const discoverySetup = read("skills/om-setup-discovery-pipeline/SKILL.md");
 const discoverySections = read("skills/om-setup-discovery-pipeline/references/sdlc-sections.md");
+const discoverySetupLoader = read("skills/om-setup-discovery-pipeline/references/agentic-setup.md");
+const discoverySetupRules = read("skills/om-setup-discovery-pipeline/references/rules.md");
+const discoveryCoverage = read("skills/om-setup-discovery-pipeline/references/skill-coverage.md");
 const backlog = read("skills/om-backlog/SKILL.md");
+const backlogRules = read("skills/om-backlog/references/rules.md");
+const backlogFiling = read("skills/om-backlog/references/filing.md");
+const syntheticInterview = read("skills/om-synthetic-users/references/interview-script.md");
+const autoQa = read("skills/om-auto-qa-pr/SKILL.md");
+const approveMerge = read("skills/om-approve-merge-pr/SKILL.md");
+const mergeBuddy = read("skills/om-merge-buddy/SKILL.md");
+const sdlc = read("SDLC.md");
 const upgradeNotes = read("skills/om-apply-upgrade-notes/SKILL.md");
 
 // The SDLC generator must resolve the configured specs directory just like its
@@ -112,18 +123,45 @@ for (const [name, text] of [
 assert.match(manageEnrichment, /`READY_STATUS` =\s*`ready` \| `not-ready`[^\n]*`n\/a`/);
 assert.match(autoFixTriage, /skip this step, treat the ticket as ready/);
 
-// om-setup-discovery-pipeline: registration, the single template source, markers, and
+// om-setup-discovery-pipeline: registration, standalone references, markers, and
 // the rule that only it pulls in the delivery setup.
 assert.match(roster, /\bom-setup-discovery-pipeline\b/);
 assert.match(readme, /docs\/skills\/om-setup-discovery-pipeline\.md/);
 assert.match(skillDocs, /\[om-setup-discovery-pipeline\]\(om-setup-discovery-pipeline\.md\)/);
-assert.match(discoverySetup, /om-setup-agent-pipeline\/references\/sdlc-template\.md/);
+assert.match(discoverySetup, /references\/sdlc-template\.md/);
 assert.match(discoverySetup, /discovery:start/);
 assert.match(discoverySetup, /run `om-setup-agent-pipeline` now/);
 assert.doesNotMatch(discoverySetup, /\bnpx uxproof\b/);
 assert.match(discoverySections, /## Adopting unmarked sections/);
 assert.match(upgradeNotes, /om-setup-discovery-pipeline --refresh/);
 assert.doesNotMatch(discover, /om-setup-discovery-pipeline/, "om-discover never invokes the setup from its workflow");
+assert.equal(discoverySdlcTemplate, sdlcTemplate, "standalone discovery template stays synchronized");
+for (const [name, content] of [
+  ["skill", discoverySetup],
+  ["setup", discoverySetupLoader],
+  ["sections", discoverySections],
+  ["rules", discoverySetupRules],
+  ["coverage", discoveryCoverage],
+]) {
+  assert.doesNotMatch(content, /om-[a-z-]+\/references\/[A-Za-z0-9._/-]+/,
+    `om-setup-discovery-pipeline ${name}: no cross-skill reference path`);
+}
+assert.match(discoverySetupLoader, /DISCOVERY_ENABLED=.*discovery\.enabled/);
+assert.match(discoveryCoverage, /PRODUCT_SKILLS="om-discover om-synthetic-users om-backlog om-mockup-prototype"/);
+
+// The QA freshness and intake contracts must be deterministic across consumers.
+assert.match(mergeBuddy, /\*\*get-pr\*\*.*\*\*get-pr-checks\*\*.*\*\*list-issue-comments\*\*/s);
+const mergeBuddyList = mergeBuddy.split("1. **Fetch open PRs.**")[1]?.split("\n\n2.")[0] ?? "";
+assert.doesNotMatch(mergeBuddyList, /headRefOid/, "list-prs requests only descriptor-supported fields");
+assert.match(mergeBuddy, /last qualifying QA grant or scope-reconfirmation comment/);
+assert.match(approveMerge, /last qualifying QA grant or scope-reconfirmation comment/);
+assert.match(autoQa, /from the diff\s+even when the current risk label is lower/);
+assert.doesNotMatch(autoQa, /inferred per `SDLC\.md` when unlabeled/);
+assert.match(syntheticInterview, /interview answers stay grounded in the persona's sourced passages/);
+assert.doesNotMatch(syntheticInterview, /answers from what the running product or prototype actually showed them in the walkthrough/);
+assert.match(backlogRules, /never edits an issue another actor is actively working on/);
+assert.match(backlogFiling, /gets the comment only; the body is left alone/);
+assert.match(sdlc, /the Maintainer — or a release manager, when the team names one/);
 
 
 

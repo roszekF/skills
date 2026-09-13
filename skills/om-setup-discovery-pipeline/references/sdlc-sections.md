@@ -1,6 +1,6 @@
 # Inserting the product-layer blocks into SDLC.md (step 4)
 
-The blocks are the `IF discovery` blocks of `om-setup-agent-pipeline/references/sdlc-template.md`, rendered with the repository's config (`{{tracker}}`, `{{specsDir}}`, `{{baseBranch}}`) and the answers from step 2 (`discovery.roles.*` resolve the nested conditionals). Two kinds of marker, because an HTML comment on its own line breaks a GFM table and splits a list:
+The blocks are the `IF discovery` blocks of this skill's own `references/sdlc-template.md`, rendered with the repository's config (`{{tracker}}`, `{{specsDir}}`, `{{baseBranch}}`) and the answers from step 2 (`discovery.roles.*` resolve the nested conditionals). Two kinds of marker, because an HTML comment on its own line breaks a GFM table and splits a list:
 
 - **Paragraphs and sections** are wrapped:
 
@@ -39,7 +39,7 @@ An `SDLC.md` generated from an earlier template may already carry a block's text
 
 ## When SDLC.md does not exist
 
-Render the whole template with `discovery.enabled` on, under the rules `om-setup-agent-pipeline/references/project-docs.md` sets for a generated `SDLC.md` (derived from this repository, shown before writing). Say in the report that the delivery half of the document was generated here because the delivery setup had skipped it.
+Render the whole local template with `discovery.enabled` on. Resolve every placeholder from this repository's config, derive any repository-specific prose from this repository only, show the complete generated file before writing, and never copy another project's process text. Say in the report that the delivery half of the document was generated here because the delivery setup had skipped it.
 
 ## Preserve the delivery Designer
 

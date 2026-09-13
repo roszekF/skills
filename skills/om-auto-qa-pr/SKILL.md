@@ -31,8 +31,9 @@ and shares one instance with integration tests.
   labels. Stated explicitly so the default is obvious.
 - `--self-qa-signoff` (optional, PR mode) — when verification is fully green AND
   screenshots were attached AND the PR carries `needs-qa` without `skip-qa` AND
-  the PR is not `risk-high` (labeled, or inferred per `SDLC.md` when unlabeled:
-  auth, sessions, data scoping, money, schema migrations, shared contracts),
+  the PR is not `risk-high` (labeled, or inferred per `SDLC.md` from the diff
+  even when the current risk label is lower: auth, sessions, data scoping,
+  money, schema migrations, shared contracts),
   additionally apply `qa-approved` + `qa-self-verified` via the self-QA exception
   documented in `SDLC.md`. On a `risk-high` PR the flag posts the evidence and
   withholds the sign-off, saying a QA reviewer is required. Off by default.
