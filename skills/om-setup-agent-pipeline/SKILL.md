@@ -43,6 +43,7 @@ Every skill in this collection reads its repository-specific settings from `.ai/
     "scripts": ".ai/scripts",
     "qa": ".ai/qa"
   },
+  "designTokens": null,
   "reviewChecklist": null,
   "closeKeywords": []
 }
@@ -69,6 +70,7 @@ Field reference:
 - `paths.analysis` — where generated reports are stored.
 - `paths.specs` — where feature specifications live (default `.ai/specs`). Spec filenames follow `{YYYY-MM-DD}-{kebab-case-title}.md`. `om-spec-writing` writes here, `om-prepare-issue` links from here, `om-followup-issue-from-pr` checks here first in design-doc mode, and `om-brainstorm` writes handoff briefs under `<paths.specs>/briefs/`.
 - `paths.prototypes` — optional repository-relative root for local prototypes (default `.ai/prototypes`). Discovery prototypes live under `discovery/<slug>/`. Preserve a configured value; use the default silently when absent and do not add a setup question. Prototype skills create their own output directories when needed.
+- `designTokens` — optional repo-relative snapshot; default unset/`null`. Preserve values; no setup question.
 - `paths.scripts` — where reusable environment scripts are generated (default `.ai/scripts`); `om-prepare-test-env` writes the env bring-up/teardown scripts here.
 - `paths.qa` — where QA working state and artifacts live (default `.ai/qa`): the shared `test-env.json` descriptor, and QA reports/screenshots under `<paths.qa>/artifacts_<runId>/`.
 - `reviewChecklist` — optional path to a repo-local review checklist file. When set, the `om-code-review` skill reads it in addition to its built-in checklist. A root `CODE_REVIEW.md` (see Project docs) is always picked up regardless.

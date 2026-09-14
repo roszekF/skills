@@ -362,3 +362,28 @@ drop actionable findings, evidence limits, or recovery instructions. Tracker
 markers, full label rationales, chaining fields, execution plans, review
 artifacts, and QA/merge gates retain their contracts. The user's collection-wide
 rewrite request authorizes this shared-file sync.
+
+## 2026-09-14: Detailed design reuses the product's components
+
+`om-ux-design` implements the detailed-design stage agreed in #107. The source
+from unreleased #106 is imported under this name; the released discovery skill
+`om-mockup-prototype` remains unchanged and receives no alias or redirected calls.
+Detailed design starts from a specification or selected backlog scope and reads
+the brief's protected rules. It prefers existing prototype runtimes and real
+components. Portable HTML remains available for repositories without a suitable
+runtime or when requested. A broken runtime is diagnosed rather than replaced.
+
+The portable token adapter reads `.uxproof/tokens.json` before `designTokens`,
+then the conventional snapshot and bundled default. This is the precedence
+explicitly agreed in the #107 plan; it supersedes the unreleased import's
+configured-snapshot-first order. The current flat contract supports theme/source
+metadata, so the old spec's missing-theme rationale no longer applies. Invalid
+selected input is an error. Defaults are proposals and never establish fidelity.
+
+Design verification, human acceptance and publication are separate. A pending
+proposal has a normal design link; the spec's authoritative `Prototype:` names
+an owner-accepted concrete version. Revisions preserve source, review identity,
+origin-dependent browser feedback and deletion operations. Existing accepted
+designs are reused by spec-authoring rather than replaced with parallel mockups.
+The old upstream #5832 release prerequisite remains open; this local update does
+not remove it or authorize remote publication.
