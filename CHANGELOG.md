@@ -1,7 +1,18 @@
 # Unreleased
 
-## ✨ Features
-- ✨ `om-mockup-prototype` — clickable, commentable pre-implementation prototypes with an anchored-comment engine, imported from upstream after design-system decoupling. (#106) *(@matgren)*
+## Features
+
+- Add `om-ux-design` for detailed screens from specifications, with repository
+  component reuse, optional portable HTML, review feedback and verified handoff.
+  Preserve the separate discovery prototype workflow.
+
+## Fixes
+
+- Preserve literal template values and the requested repository root in portable
+  design helpers; validate themed extraction tokens and review comment imports.
+- Preserve deleted feedback and earlier-clock replies across reviewer clock
+  differences, and keep screen navigation and Back working in presentation and
+  click-through modes.
 
 # 1.1.0 (2026-08-13)
 

@@ -25,7 +25,13 @@ contract is fresh. When the user wants judgment, name the skill that owns it
 and stop: `om-ux-review-pr` for a pull request's running UI, `om-ux-shape` in
 Review mode for a whole module or flow. Reviewing design files against the
 contract is not covered by any skill in this collection yet; say so plainly
-rather than improvising it here.
+rather than improvising it here. When the repository has no design system to
+extract, report that limit. For detailed screens from a specification, name
+`om-ux-design` as an optional next task; it uses the repository's components when
+available and labels a visual direction as proposed when there is no DS. Do not
+invoke it automatically or treat design approval as an extracted contract.
+For an early flow experiment, name `om-mockup-prototype`: it creates neutral
+clickable screens and keeps `.uxproof/` unchanged.
 
 ## What the contract holds
 
@@ -42,6 +48,8 @@ Full shapes, and the by-hand fallback, live in
 `references/contract-format.md`.
 
 ## Workflow
+
+**ALWAYS check first:** Apply `.ai/skills/om-ux-setup/SKILL.md` when present; safety rules still win.
 
 0. **Agentic setup** — follow `references/agentic-setup.md`: repo-local
    override contract, untrusted-content boundary, and the offline fallback

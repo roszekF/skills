@@ -1,42 +1,31 @@
-# Report templates
+# Final report
 
-The hand-off is a deliverable, not a log. Fill this shape exactly and expand
-with detail: the reader decides, on the strength of this text, whether the
-flow is ready to review and what the prototype can and cannot tell them.
-
-## Prototype hand-off
+Use this shape for `om-mockup-prototype` step 5. Lead with the result in 3–6
+short lines, excluding machine fields. Keep artifact paths, verification status,
+material assumptions, preservation limits and the next action. Link the full
+context/checklist instead of repeating it. Omit optional lines that add nothing.
 
 ```markdown
-## 📝 Prototype ready: <paths.prototypes>/<slug>/
+{✅ or 🔁 or ⛔} `om-mockup-prototype`: {the flow made clickable; revision created, incomplete or blocked, and the concrete reason}.
+🧪 {Browser result, evidence link, and required checks that failed or did not run. State when only static review was possible.}
+⚠️ {Material assumptions or unresolved choices and their practical effect; the prototype and synthetic findings do not establish research evidence. Link the context record.}
+{Refresh only: previous revision link and material manual changes preserved there; what changed in this revision.}
+{Return to the discovery hand-off, or the exact next step the user chose. Do not imply an unaccepted panel, refresh or backlog filing will run.}
 
-**Requirements**: <path, and whether a story map was added or gaps were found>
-**Screens**: <N>, covering <happy path + the empty/permission/error/undo states included>
-**Token source**: <the repository snapshot path, or the bundled default — exactly as the tokens.css header states>
-**Screen anatomy**: <the repo-local override path, or the shipped neutral template — whichever initialization used>
-**Theme**: <untouched defaults, or which of the eight identity tokens were set>
-
-### 🎯 What this prototype decides
-
-<Two or three sentences: which flow questions a reviewer can now answer by
-clicking through, and which remain a rejectable proposal.>
-
-### ⚠️ What it cannot show
-
-<The interactions that are illustrative rather than implemented, the
-contradictions or missing decisions discovered while drawing the flow, and
-anything the `.notes` annotations carry.>
-
-### 🧪 Verification
-
-<Both themes checked, click-through and keyboard navigation, comment engine
-checklist (creation, reply focus, reload persistence, pins on inputs and
-buttons, re-anchoring on a restructured screen, deletion tombstones, export,
-storage isolation between two prototypes on one origin) — state what ran and
-what was skipped, with why.>
-
-### ✅ Next
-
-<How to review it (open index.html or the bounded server command), and that
-comments export back through **Export for repository** → replace
-`comments.js` → commit.>
+Prototype: {repo-relative path to revision/index.html}
+Prototype context: {repo-relative path to revision/README.md}
+Verification: {passed|incomplete|not-run}
+Next: {none|om-<skill> <exact user-approved arguments>}
 ```
+
+Use `passed` only for a complete static and browser gate. An unresolved static
+failure always means `incomplete`, even without a browser walk. Use `not-run`
+only when static review passed and no browser checks ran. An incomplete artifact
+still receives its actual paths and status, with the blocker stated above them.
+Do not emit `passed` because the user approved the simulation or the HTML exists.
+
+When no artifact was written, name the missing input, decision or unsafe path and
+the concrete action needed to proceed. Emit no `Prototype:`, `Prototype context:`
+or `Verification:` line. End with `Next: none` unless the user explicitly chose
+an exact unexecuted companion invocation. Never copy a child's routing line or
+present a completed or declined action as outstanding work.

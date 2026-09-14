@@ -8,6 +8,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const SKILL_DIR = resolve(SCRIPT_DIR, '..')
 const ASSETS_DIR = join(SKILL_DIR, 'references/assets')
 const BUNDLED_SNAPSHOT_PATH = join(SKILL_DIR, 'references/ds-tokens.default.json')
+const CONTRACT_TOKENS_RELATIVE = '.uxproof/tokens.json'
 const REPO_SNAPSHOT_RELATIVE = '.ai/ds/ds-tokens.json'
 const PROTOTYPES_ROOT_RELATIVE = '.ai/prototypes'
 const BUNDLED_STYLESHEETS = ['components.css', 'screens.css', 'prototype.css']
@@ -72,13 +73,60 @@ export function resolveConfiguredPath(repoRoot, configuredPath, fallback, fieldN
 }
 
 export function resolvePrototypesRoot(repoRoot = REPO_ROOT, config = readAgenticConfig(repoRoot)) {
-  return resolveConfiguredPath(repoRoot, config.paths?.prototypes, PROTOTYPES_ROOT_RELATIVE, 'paths.prototypes')
+  const root = resolveConfiguredPath(repoRoot, config.paths?.prototypes, PROTOTYPES_ROOT_RELATIVE, 'paths.prototypes')
+  assertPrototypeLocation(repoRoot, root)
+  return root
+}
+
+export function assertPrototypeLocation(repoRoot, target) {
+  const repositoryRoot = realpathSync(repoRoot)
+  let existingAncestor = resolve(target)
+  while (!existsSync(existingAncestor)) existingAncestor = dirname(existingAncestor)
+  const locations = [resolve(target), realpathSync(existingAncestor)]
+  for (const location of new Set(locations)) {
+    const lexicalRelative = relative(resolve(repoRoot), location)
+    const usesCanonicalRoot = lexicalRelative.startsWith('..') || isAbsolute(lexicalRelative)
+    const boundary = usesCanonicalRoot ? repositoryRoot : resolve(repoRoot)
+    const normalized = relative(boundary, location)
+    if (normalized.startsWith('..') || isAbsolute(normalized)) {
+      throw new Error('Prototype output must resolve inside the repository.')
+    }
+    if (normalized.split(/[\\/]/).some((part) => part === '.git' || part === '.uxproof')) {
+      throw new Error('Prototype output must not be inside .git or .uxproof.')
+    }
+    let directory = location
+    while (directory !== boundary) {
+      if (existsSync(join(directory, 'SKILL.md'))) {
+        throw new Error('Prototype output must not be inside an installed skill or local override.')
+      }
+      const manifest = join(directory, 'prototype.json')
+      if (existsSync(manifest)) {
+        try {
+          if (lstatSync(manifest).isSymbolicLink()) throw new Error('ownership record is a symbolic link')
+          const owner = JSON.parse(readFileSync(manifest, 'utf8'))
+          if (owner?.format === 'discovery-prototype-v1' || owner?.skill === 'om-mockup-prototype') {
+            throw new Error('This directory belongs to om-mockup-prototype discovery output; use a separate detailed-design directory.')
+          }
+        } catch (error) {
+          throw new Error(`Could not use prototype directory at ${directory}: ${error.message}`)
+        }
+      }
+      const parent = dirname(directory)
+      if (parent === directory) break
+      directory = parent
+    }
+  }
 }
 
 export function resolveSnapshot(repoRoot = REPO_ROOT, config = readAgenticConfig(repoRoot)) {
+  const contractSnapshot = resolveConfiguredPath(repoRoot, CONTRACT_TOKENS_RELATIVE, CONTRACT_TOKENS_RELATIVE, '.uxproof/tokens.json')
+  if (existsSync(contractSnapshot)) return { path: contractSnapshot, source: CONTRACT_TOKENS_RELATIVE }
   if (config.designTokens !== undefined && config.designTokens !== null) {
     const configuredSnapshot = resolveConfiguredPath(repoRoot, config.designTokens, REPO_SNAPSHOT_RELATIVE, 'designTokens')
-    if (existsSync(configuredSnapshot)) return { path: configuredSnapshot, source: config.designTokens }
+    if (!existsSync(configuredSnapshot)) {
+      throw new Error(`Configured designTokens file does not exist: ${config.designTokens}. Correct the path or remove designTokens to use automatic source selection.`)
+    }
+    return { path: configuredSnapshot, source: config.designTokens }
   }
   const repoSnapshot = resolveConfiguredPath(repoRoot, REPO_SNAPSHOT_RELATIVE, REPO_SNAPSHOT_RELATIVE, 'designTokens')
   if (existsSync(repoSnapshot)) return { path: repoSnapshot, source: REPO_SNAPSHOT_RELATIVE }
@@ -86,53 +134,128 @@ export function resolveSnapshot(repoRoot = REPO_ROOT, config = readAgenticConfig
 }
 
 function readSnapshot(snapshotPath) {
-  let parsed
   try {
-    parsed = JSON.parse(readFileSync(snapshotPath, 'utf8'))
+    const parsed = JSON.parse(readFileSync(snapshotPath, 'utf8'))
+    if (Array.isArray(parsed)) return flatDeclarations(parsed)
+    if (!parsed || typeof parsed.tokens !== 'object' || parsed.tokens === null || Array.isArray(parsed.tokens)) {
+      throw new Error('Expected a flat token array or a legacy "tokens" object.')
+    }
+    return legacyDeclarations(parsed.tokens)
   } catch (error) {
     throw new Error(
       `Could not read the token snapshot at ${snapshotPath}: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
-  if (!parsed || typeof parsed.tokens !== 'object' || parsed.tokens === null) {
-    throw new Error(`Token snapshot at ${snapshotPath} has no "tokens" object.`)
-  }
-  return parsed.tokens
 }
 
-function tokenDeclarations(tokens) {
-  const root = []
-  const dark = []
-  for (const [name, token] of Object.entries(tokens)) {
-    if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(name)) {
-      throw new Error(`Token name "${name}" is not safe for a CSS custom property.`)
+function propertyName(name) {
+  if (typeof name !== 'string' || !/^(?:--)?[A-Za-z_][A-Za-z0-9_-]*$/.test(name)) {
+    throw new Error(`Token name "${name}" is not safe for a CSS custom property.`)
+  }
+  return name.startsWith('--') ? name : `--${name}`
+}
+
+function cssValue(value, name) {
+  if ((typeof value !== 'string' && typeof value !== 'number') ||
+      (typeof value === 'number' && !Number.isFinite(value)) || String(value).trim() === '') {
+    throw new Error(`Token "${name}" must have a non-empty string or finite number value.`)
+  }
+  const result = String(value).trim()
+  // CSS escapes can hide a URL function; image() and image-set() also accept
+  // URL strings without a literal url(). Portable token values cannot fetch.
+  if (/[;{}\r\n\0\\]|(?:url|(?:-webkit-)?image-set|image|src)\s*\(|\/\*|\*\//i.test(result)) {
+    throw new Error(`Token "${name}" contains an unsafe CSS value.`)
+  }
+  return result
+}
+
+function addDeclaration(block, name, value, source) {
+  const property = propertyName(name)
+  const safeValue = cssValue(value, name)
+  const previous = block.get(property)
+  if (previous && (previous.value !== safeValue || previous.originalName !== name)) {
+    throw new Error(`Conflicting token declarations for "${property}" in the same theme (${previous.originalName}, ${name}).`)
+  }
+  if (previous) {
+    if (source) previous.sources.add(source)
+    return
+  }
+  block.set(property, { name: property, value: safeValue, originalName: name, sources: new Set(source ? [source] : []) })
+}
+
+function flatDeclarations(tokens) {
+  const themes = { both: new Map(), light: new Map(), dark: new Map() }
+  for (const [index, token] of tokens.entries()) {
+    if (!token || typeof token !== 'object' || Array.isArray(token)) {
+      throw new Error(`Token at index ${index} must be an object.`)
     }
+    const theme = token.theme === undefined ? 'both' : token.theme
+    if (!Object.hasOwn(themes, theme)) {
+      throw new Error(`Token "${token.name}" has unsupported theme "${theme}"; use light, dark, or both.`)
+    }
+    if (token.source !== undefined && (typeof token.source !== 'string' || !token.source.trim())) {
+      throw new Error(`Token "${token.name}" source must be a non-empty string when provided.`)
+    }
+    addDeclaration(themes[theme], token.name, token.value, token.source)
+  }
+  const root = new Map([...themes.both, ...themes.light])
+  // An explicit "both" value remains the dark base when "light" overrides it.
+  const dark = new Map([...themes.both, ...themes.dark])
+  for (const name of dark.keys()) {
+    if (!themes.light.has(name) && !themes.dark.has(name)) dark.delete(name)
+  }
+  return { root: [...root.values()], dark: [...dark.values()] }
+}
+
+function legacyDeclarations(tokens) {
+  const root = new Map()
+  const dark = new Map()
+  for (const [name, token] of Object.entries(tokens)) {
     if (!token || typeof token !== 'object' || Array.isArray(token)) {
       throw new Error(`Token "${name}" must be an object.`)
     }
-    const property = `--${name}`
     const lightValue = token.value !== undefined ? token.value : token.light
     if (lightValue === undefined || lightValue === null) {
       throw new Error(`Token "${name}" in the snapshot carries neither "value" nor "light".`)
     }
-    const safeLightValue = String(lightValue)
-    if (/[;{}]|url\s*\(/i.test(safeLightValue)) {
-      throw new Error(`Token "${name}" contains an unsafe CSS value.`)
-    }
-    root.push({ name: property, value: safeLightValue })
+    addDeclaration(root, name, lightValue)
     if (!token.themeInvariant && token.dark !== undefined && token.dark !== null) {
-      const safeDarkValue = String(token.dark)
-      if (/[;{}]|url\s*\(/i.test(safeDarkValue)) {
-        throw new Error(`Token "${name}" contains an unsafe CSS value.`)
-      }
-      dark.push({ name: property, value: safeDarkValue })
+      addDeclaration(dark, name, token.dark)
     }
   }
-  return { root, dark }
+  return { root: [...root.values()], dark: [...dark.values()] }
+}
+
+function cssComment(value) {
+  return value.replace(/\*\//g, '* /').replace(/\/\*/g, '/ *').replace(/[\r\n]/g, ' ')
+}
+
+function assertTokenAliasesResolve(root, dark) {
+  for (const [theme, entries] of [['light', root], ['dark', [...root, ...dark]]]) {
+    const declarations = new Map(entries.map(({ name, value }) => [name, value]))
+    const checked = new Set()
+    const visiting = new Set()
+    const visit = (name) => {
+      if (visiting.has(name)) throw new Error(`Circular token alias in ${theme} theme: ${name}`)
+      if (checked.has(name)) return
+      visiting.add(name)
+      for (const match of declarations.get(name).matchAll(/var\(\s*(--[A-Za-z0-9_-]+)\s*([,)])/g)) {
+        if (declarations.has(match[1])) visit(match[1])
+        else if (match[2] !== ',') throw new Error(`Token ${name} references undefined alias ${match[1]} in ${theme} theme.`)
+      }
+      visiting.delete(name)
+      checked.add(name)
+    }
+    for (const name of declarations.keys()) visit(name)
+  }
 }
 
 function emitDeclarations(declarations, indent = '  ') {
-  return declarations.map((declaration) => `${indent}${declaration.name}: ${declaration.value};`).join('\n')
+  return declarations.map((declaration) => {
+    const sources = [...declaration.sources].sort().map(cssComment)
+    const provenance = sources.length ? ` /* Source: ${sources.join(', ')} */` : ''
+    return `${indent}${declaration.name}: ${declaration.value};${provenance}`
+  }).join('\n')
 }
 
 export function assertBundledVariablesResolve(generatedCss, assetsDirectory = ASSETS_DIR) {
@@ -155,14 +278,15 @@ export function assertBundledVariablesResolve(generatedCss, assetsDirectory = AS
   }
 }
 
-export function buildTokens(snapshotPath, assetsDirectory = ASSETS_DIR) {
-  const snapshot = snapshotPath ? { path: snapshotPath, source: snapshotPath } : resolveSnapshot()
-  const { root, dark } = tokenDeclarations(readSnapshot(snapshot.path))
+export function buildTokens(snapshotPath, assetsDirectory = ASSETS_DIR, options = {}) {
+  const snapshot = snapshotPath ? { path: snapshotPath, source: snapshotPath } : resolveSnapshot(options.repoRoot)
+  const { root, dark } = readSnapshot(snapshot.path)
+  assertTokenAliasesResolve(root, dark)
 
   const generated = [
     '/* GENERATED — do not edit by hand.',
-    ` * Source: ${snapshot.source}`,
-    ' * Regenerate with the om-mockup-prototype skill: scripts/sync-tokens.mjs.',
+    ` * Source: ${cssComment(snapshot.source)}`,
+    ' * Regenerate with the om-ux-design skill: scripts/sync-tokens.mjs.',
     ' */',
     '',
     ':root {',
@@ -224,7 +348,7 @@ export function parseSyncArguments(args) {
   throw new Error('Usage: sync-tokens.mjs [--check] <paths.prototypes>/<prototype-slug>')
 }
 
-export function resolvePrototypeTarget(targetArgument, prototypesRoot = resolvePrototypesRoot()) {
+export function resolvePrototypeTarget(targetArgument, prototypesRoot = resolvePrototypesRoot(), repoRoot = REPO_ROOT) {
   const target = resolve(targetArgument)
   const targetRelative = relative(prototypesRoot, target)
   if (
@@ -249,6 +373,7 @@ export function resolvePrototypeTarget(targetArgument, prototypesRoot = resolveP
   if (!resolvedRelative || resolvedRelative.startsWith('..') || isAbsolute(resolvedRelative)) {
     throw new Error('Prototype target resolves outside paths.prototypes.')
   }
+  assertPrototypeLocation(repoRoot, resolvedTarget)
   return resolvedTarget
 }
 
@@ -257,6 +382,11 @@ function main() {
     const { checkOnly, target: targetArgument } = parseSyncArguments(process.argv.slice(2))
     const target = resolvePrototypeTarget(targetArgument)
     const outputPath = join(target, 'tokens.css')
+    try {
+      if (lstatSync(outputPath).isSymbolicLink()) throw new Error('tokens.css must not be a symbolic link.')
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
     const generated = buildTokens()
 
     if (checkOnly) {

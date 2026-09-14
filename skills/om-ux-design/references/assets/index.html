@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>{{MODULE}} — interactive backend prototype</title>
+<title>{{MODULE}} design prototype</title>
 <link rel="stylesheet" href="tokens.css" />
 <link rel="stylesheet" href="theme.css" />
 <link rel="stylesheet" href="components.css" />
@@ -35,7 +35,7 @@
 </defs></svg>
 
 <div class="doc-toolbar">
-  <strong style="font-size:0.875rem">{{MODULE}} — prototype</strong>
+  <strong style="font-size:0.875rem">{{MODULE}} prototype</strong>
   <nav class="screen-nav" aria-label="Screens">
     <a href="#s1">1 List</a>
     <!-- Add screens with links such as <a href="#s2">2 Form</a>. -->
@@ -49,14 +49,10 @@
 <div class="doc">
 
 <header class="doc-head">
-  <h1>{{MODULE}} — screen inventory</h1>
-  <p class="muted" style="max-width:65ch;margin:0">
-    Interactive backend screens derived from <code class="t-mono">{{REQUIREMENTS}}</code>.
-    The shell, page scaffolding, DataTable chrome, and CrudForm layout follow the
-    product's backend screen anatomy; colors and spacing come from the design-token
-    snapshot (<code class="t-mono">tokens.css</code>, rebrandable through
-    <code class="t-mono">theme.css</code>). Every screen lists its requirement and user-story coverage.
-  </p>
+  <h1>{{MODULE}} screen inventory</h1>
+  <p class="muted">Portable design scaffold from <code>{{REQUIREMENTS}}</code>.
+    Replace the starter with the selected screens and record verification and
+    acceptance in the README. The scaffold has not been visually verified.</p>
 </header>
 
 <!-- Screen-section template. Keep each id="sN" unique and stable. -->
@@ -70,54 +66,13 @@
   <div class="frame">
     <div class="frame-bar">
       <div class="frame-dots"><i></i><i></i><i></i></div>
-      <span class="frame-url">/backend/module/resource</span>
+      <span class="frame-url">Selected screen</span>
     </div>
-    <div class="app app-narrow">
-
-      <aside class="sidebar">
-        <div class="sidebar-brand"><span class="brand-mark">B</span> <span class="ellipsis">Backoffice</span></div>
-        <div class="sidebar-search"><svg><use href="#ic-search"/></svg> Search</div>
-        <nav class="sidebar-nav">
-          <div class="nav-group"><span>Module</span><svg><use href="#ic-chevron-down"/></svg></div>
-          <div class="nav-items">
-            <span class="nav-item active"><svg><use href="#ic-home"/></svg> Current item</span>
-            <a class="nav-item" href="#s2" data-goto="s2"><svg><use href="#ic-plus"/></svg> Another screen</a>
-          </div>
-        </nav>
-      </aside>
-
-      <div class="main">
-        <header class="topbar">
-          <div class="topbar-left">
-            <div class="crumbs">
-              <svg><use href="#ic-home"/></svg><svg><use href="#ic-chevron-right"/></svg>
-              <span class="here">Screen</span>
-            </div>
-          </div>
-          <div class="topbar-right">
-            <div class="topbar-search"><svg><use href="#ic-search"/></svg> Search</div>
-            <button class="icon-btn" aria-label="Notifications"><svg><use href="#ic-bell"/></svg></button>
-            <span class="avatar">AN</span>
-          </div>
-        </header>
-
-        <main class="page">
-          <div class="page-head">
-            <div><h1 class="t-page-title">Title</h1><p>Contextual subtitle.</p></div>
-            <div class="page-actions">
-              <button class="btn btn-primary" data-goto="s2"><svg><use href="#ic-plus"/></svg> New</button>
-            </div>
-          </div>
-
-          <!-- Screen content. See references/screen-patterns.md for DataTable, CrudForm, and Kanban patterns. -->
-
-        </main>
-        <footer class="app-foot">
-          <span>v1.0.0</span>
-          <nav class="row-3"><span>Terms</span><span>Privacy</span></nav>
-        </footer>
-      </div>
-    </div>
+    <main class="page">
+      <h1 class="t-page-title">Build the selected screen here</h1>
+      <p>Use the repository's components and screen conventions, or label the
+        visual direction as proposed when no design system exists.</p>
+    </main>
   </div>
 
   <div class="notes">

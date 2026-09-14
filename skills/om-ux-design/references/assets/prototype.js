@@ -9,7 +9,7 @@
   var committedOperations = clone(committedDocument.operations);
   deepFreeze(committedOperations);
   var committedOperationIds = new Set(committedOperations.map(function (operation) { return operation.id; }));
-  var localOperations = normalizeOperations(load(threadsStorageKey, { version: 2, operations: [] }).operations)
+  var localOperations = normalizeDocument(load(threadsStorageKey, { version: 2, operations: [] })).operations
     .filter(function (operation) { return !committedOperationIds.has(operation.id); });
   var author = load(authorStorageKey, '');
   var threads = [];
@@ -86,7 +86,12 @@
   function applyOperations() {
     var byId = new Map();
     var order = [];
-    allOperations().forEach(function (operation) {
+    var operations = allOperations();
+    var deleted = new Set(operations.filter(function (operation) {
+      return operation.type === 'delete';
+    }).map(function (operation) { return operation.threadId; }));
+    // Materialize creates first: reviewer clocks do not establish causality.
+    operations.forEach(function (operation) {
       var thread = byId.get(operation.threadId);
       if (operation.type === 'create') {
         if (thread || !operation.payload || !operation.payload.message) return;
@@ -103,12 +108,10 @@
         order.push(thread.id);
         return;
       }
-      if (!thread) return;
-      if (operation.type === 'delete') {
-        thread.deletedAt = operation.at;
-        return;
-      }
-      if (thread.deletedAt) return;
+    });
+    operations.forEach(function (operation) {
+      var thread = byId.get(operation.threadId);
+      if (!thread || deleted.has(operation.threadId)) return;
       if (operation.type === 'reply' && operation.payload && operation.payload.message) {
         var messageExists = thread.messages.some(function (message) {
           return message.id === operation.payload.message.id;
@@ -125,7 +128,7 @@
       }
     });
     threads = order.map(function (threadId) { return byId.get(threadId); })
-      .filter(function (thread) { return thread && !thread.deletedAt; });
+      .filter(function (thread) { return thread && !deleted.has(thread.id); });
   }
 
   function addOperation(type, threadId, payload) {
@@ -173,7 +176,7 @@
 
   function goTo(screenId, record) {
     var target = document.getElementById(screenId);
-    if (!target) {
+    if (!target || !target.classList.contains('screen')) {
       flashToast('This screen does not exist in the prototype: ' + screenId);
       return;
     }
@@ -181,9 +184,9 @@
       var current = document.querySelector('.screen.is-current');
       if (current && current.id !== screenId) history.push(current.id);
     }
+    screens().forEach(function (screen) { screen.classList.remove('is-current'); });
+    target.classList.add('is-current');
     if (focusMode) {
-      screens().forEach(function (screen) { screen.classList.remove('is-current'); });
-      target.classList.add('is-current');
       window.scrollTo(0, 0);
     } else {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -268,7 +271,7 @@
   function renderPins() {
     clearPins();
     var orphans = [];
-    var counters = {};
+    var counters = Object.create(null);
     var layers = new Map();
 
     threads.forEach(function (thread) {
@@ -396,12 +399,13 @@
       }));
     }
 
-    var byScreen = {};
+    var byScreen = Object.create(null);
     visibleThreads.forEach(function (thread) {
       (byScreen[thread.screen] = byScreen[thread.screen] || []).push(thread);
     });
     Object.keys(byScreen).forEach(function (screenId) {
-      var heading = document.querySelector('#' + screenId + ' .screen-meta h2');
+      var screenElement = document.getElementById(screenId);
+      var heading = screenElement && screenElement.querySelector('.screen-meta h2');
       panelBody.appendChild(element('div', { class: 't-overline', text: heading ? heading.textContent : screenId }));
       byScreen[screenId].forEach(function (thread) { panelBody.appendChild(threadCard(thread)); });
     });
@@ -580,12 +584,13 @@
   function exportMarkdown() {
     var title = (document.querySelector('.doc-head h1') || {}).textContent || 'Prototype';
     var lines = ['# Prototype feedback — ' + title, ''];
-    var byScreen = {};
+    var byScreen = Object.create(null);
     threads.forEach(function (thread) {
       (byScreen[thread.screen] = byScreen[thread.screen] || []).push(thread);
     });
     Object.keys(byScreen).forEach(function (screenId) {
-      var heading = document.querySelector('#' + screenId + ' .screen-meta h2');
+      var screenElement = document.getElementById(screenId);
+      var heading = screenElement && screenElement.querySelector('.screen-meta h2');
       lines.push('## ' + (heading ? heading.textContent : screenId), '');
       byScreen[screenId].forEach(function (thread) {
         lines.push('- **' + (thread.label || 'screen') + '**' + (thread.resolved ? ' _(resolved)_' : ''));
@@ -608,6 +613,14 @@
   }
 
   function onDocumentClick(event) {
+    var screenLink = event.target.closest('.screen-nav a[href^="#"]');
+    if (screenLink) {
+      event.preventDefault();
+      var destination = screenLink.getAttribute('href').slice(1);
+      try { destination = decodeURIComponent(destination); } catch (error) { /* Use the literal ID. */ }
+      goTo(destination);
+      return;
+    }
     if (event.target.closest('.anno-panel') || event.target.closest('.doc-toolbar')) return;
     if (event.target.closest('.anno-pin')) return;
     var frame = event.target.closest('.frame');
@@ -710,6 +723,8 @@
   }
 
   document.addEventListener('DOMContentLoaded', function () {
+    var firstScreen = screens()[0];
+    if (firstScreen && !document.querySelector('.screen.is-current')) firstScreen.classList.add('is-current');
     applyOperations();
     buildPanel();
     buildToolbar();
