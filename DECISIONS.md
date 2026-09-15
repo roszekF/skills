@@ -387,3 +387,19 @@ origin-dependent browser feedback and deletion operations. Existing accepted
 designs are reused by spec-authoring rather than replaced with parallel mockups.
 The old upstream #5832 release prerequisite remains open; this local update does
 not remove it or authorize remote publication.
+
+## 2026-09-15: Verify the detailed-design import against its pinned source
+
+[@matgren accepted](https://github.com/open-mercato/skills/pull/106#issuecomment-5678863467) the [replacement proposed for #106](https://github.com/open-mercato/skills/pull/106#issuecomment-5667076965)
+to the original #5832 merge-order gate. After the split in #107 and the detailed
+workflow changes, the collection is the source going forward. The gate records
+upstream `9ea83205be7447867c042bbcfd3caaa9b4cadfb5`, the complete file mapping,
+intentional differences, retained verification evidence and fresh review.
+The amended condition lives in the #91 specification's Rollout section and the
+#106 description; `.ai/runs/2026-09-15-ux-design-import-verification.md` contains the comparison.
+
+The original gate owner, @pkarw, must confirm the revised condition and re-review
+the current head before `blocked` is removed. This records the agreed coordination
+change without treating source provenance, green tests, or @matgren's acceptance
+as a substitute for that review. Upstream #5832 can proceed independently once
+this revised condition is confirmed.

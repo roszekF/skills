@@ -79,5 +79,12 @@ registration, usage docs, role routing, config defaults and validation/CI togeth
 
 User-approved plan in this task, 2026-09-14. PR #107 merged before implementation.
 Imported source: PR #106 at `730a1d68d93a697a976d7563359c9c819c31b29b`.
-The original import's upstream release prerequisite remains open until explicitly
-resolved or satisfied; local work and tests do not remove it.
+On 2026-09-15, [@matgren accepted the replacement rollout condition](https://github.com/open-mercato/skills/pull/106#issuecomment-5678863467):
+verify the import from upstream commit `9ea83205be7447867c042bbcfd3caaa9b4cadfb5`,
+record all mappings and intentional differences, retain the verification evidence,
+and obtain @pkarw's confirmation and fresh review before removing `blocked`.
+The governing condition is the **Rollout** section of
+`.ai/specs/2026-08-26-interactive-prototype-skill.md`; the comparison and evidence
+are in `.ai/runs/2026-09-15-ux-design-import-verification.md`. This explicit amendment supersedes
+upstream merge ordering for #106 once the required confirmation is recorded;
+local implementation or tests alone never waive the gate.

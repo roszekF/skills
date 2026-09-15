@@ -1,6 +1,15 @@
 # Run: import-om-mockup-prototype
 
-Source doc: `.ai/specs/2026-08-26-interactive-prototype-skill.md` (merged via #91); this run executes its **Phase 2 — Add the skill here** (steps 8–14). Subject issue: #104. Import source: branch `feat/om-mockup-prototype-decouple` of the upstream monorepo (its Phase 1 PR is open, CI-green, awaiting review) — **not** upstream `main`, which still carries the coupled version. This PR is therefore `blocked` / do-not-merge until the upstream Phase 1 PR merges and the import is re-verified against the merged commit.
+Source doc: `.ai/specs/2026-08-26-interactive-prototype-skill.md` (merged via #91);
+this historical run executed its **Phase 2 — Add the skill here** (steps 8–14).
+Subject issue: #104. The initial import came from upstream branch
+`feat/om-mockup-prototype-decouple`, pinned at `9ea83205be7447867c042bbcfd3caaa9b4cadfb5`.
+The original upstream-merge prerequisite has an explicit rollout amendment
+[accepted by @matgren](https://github.com/open-mercato/skills/pull/106#issuecomment-5678863467), recorded in the source spec's **Rollout**
+section. The current skill is `om-ux-design`; the completed steps below retain
+its original name as implementation history. The current import comparison is
+`.ai/runs/2026-09-15-ux-design-import-verification.md`. PR #106 remains `blocked` pending
+@pkarw's confirmation of the amendment and fresh review of the current head.
 
 ## Goal
 
@@ -34,7 +43,7 @@ Non-goals: no changes to any other skill's content; no tracker operations added 
 
 ## Risks
 
-- The import source is an unmerged upstream branch: if Phase 1 review changes those files, this PR must re-import before merge. Mitigated by the `blocked` label, the do-not-merge note, and a recorded source commit SHA to diff against the merged commit.
+- Upstream and collection code intentionally diverge after the pinned import. The amended rollout gate requires the complete mapping and accounted differences in `.ai/runs/2026-09-15-ux-design-import-verification.md`, current validation, and @pkarw's confirmation and fresh review before `blocked` is removed. A future upstream change is assessed explicitly rather than silently re-imported over the detailed-design workflow.
 - The lint's product-agnosticism grep scans every file under `skills/`, including JSON and JS assets; a missed token in a large asset fails CI. Mitigated by running `bash scripts/lint.sh` after each phase.
 - Step 13 is new behavior (not decoupled behavior): the override scaffolding must not break the upstream flow when Phase 3 later points the monorepo at this copy; the template stays inert unless the override file is missing.
 
