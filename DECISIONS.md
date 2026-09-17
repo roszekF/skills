@@ -362,3 +362,33 @@ drop actionable findings, evidence limits, or recovery instructions. Tracker
 markers, full label rationales, chaining fields, execution plans, review
 artifacts, and QA/merge gates retain their contracts. The user's collection-wide
 rewrite request authorizes this shared-file sync.
+
+## 2026-09-17: Add `om-qa-buddy`, a human-in-the-loop manual QA companion
+
+A contributor's own 10-skill manual QA pipeline, battle-tested in an external
+deployment, is consolidated here into one generalized skill rather than ported
+skill-for-skill: context gathering, plain-language translation, and regression
+lookup collapse into one step; the app-specific local environment setup
+(exact build/run commands, tenant/org UI selection) is dropped in favor of the
+existing stack-agnostic `om-prepare-test-env`; and the standalone archival
+housekeeping skill is left out as unrelated to a single QA session.
+
+Unlike `om-auto-qa-pr`'s automated pipeline sign-off, this skill never
+comments, labels, or claims a tracker item — every deliverable (test plan,
+bug files, verdict) is handed to the user to read or paste. It also
+reproduces the source pipeline's most valuable, and hardest to port, piece:
+an interactive runbook published *before* execution starts so a human tester
+can work through it in parallel, then updated in place with AI verdicts and
+bug evidence at the end, with the tester's own per-case verdicts surviving
+the update via a stable element id and storage key. The source design published
+this exclusively through a Claude-specific hosted-artifact tool, which this
+collection's Codex-compatible skills cannot depend on; the generalized version
+writes a self-contained local HTML file (inline CSS/JS, no external requests)
+that works from any agent, and additionally publishes to a hosted link only
+when the running environment offers that capability.
+
+Finally, the skill grows a small local QA knowledge base
+(`<paths.qa>/knowledge-base/`: a module-history log and a risk-hotspots list)
+that later sessions read before planning — the one genuinely new,
+cross-session capability the source pipeline had that no existing skill in
+this collection covers.
