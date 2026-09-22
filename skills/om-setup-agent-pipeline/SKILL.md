@@ -51,7 +51,7 @@ Every skill in this collection reads its repository-specific settings from `.ai/
 Field reference:
 
 - `baseBranch` — the branch PRs target. `"auto"` means resolve at runtime from the repository's default branch; set an explicit name only when PRs target something else.
-- `tracker` — selects `.ai/trackers/<tracker>.md`. Shipped values are `"github"`, `"linear"` (Linear issues + GitHub PRs/CI), and `"jira"` (Jira Cloud issues + GitHub PRs/CI); see Tracker providers below.
+- `tracker` — selects `.ai/trackers/<tracker>.md`. Shipped values are `"github"`, `"gitlab"`, `"linear"` (Linear issues + GitHub PRs/CI), and `"jira"` (Jira Cloud issues + GitHub PRs/CI); see Tracker providers below.
 - `browser.provider` — the browser-automation provider used by QA and integration-test skills. Selects `.ai/browsers/<provider>.md`. Fresh setups default to `"agent-browser"`; configs without this key keep legacy Playwright behavior (see Browser providers).
 - `validation.commands` — ordered list of shell commands that constitute the full validation gate. Skills run them in order and treat any non-zero exit as a gate failure. Keep the list complete: typecheck, lint, tests, build — whatever proves the repo is healthy.
 - `labels.enabled` — when `false`, skills skip every label operation and note that in their PR summaries. Use this for repos that do not want the label workflow.
@@ -79,7 +79,7 @@ Field reference:
 
 Skills name the operations in `references/trackers/TEMPLATE.md`; the selected `.ai/trackers/<tracker>.md` says how to execute them and is the team's committed override point. This skill installs shipped descriptors from its own `references/trackers/` directory.
 
-The collection ships `github.md`, `linear.md`, and `jira.md`. Linear and Jira own issues but delegate repository/PR/review/CI/PR-label operations to a required `github.md` companion, so setup installs both. Scaffold any other provider from `TEMPLATE.md`.
+The collection ships `github.md`, `gitlab.md`, `linear.md`, and `jira.md`. GitHub and GitLab are stand-alone. Linear and Jira own issues but delegate repository/PR/review/CI/PR-label operations to a required `github.md` companion, so setup installs both. Scaffold any other provider from `TEMPLATE.md`.
 
 ## Browser providers
 
@@ -101,7 +101,7 @@ Every skill in this collection checks, right after loading the config, for a rep
 
 1. **Refuse to clobber silently.** If `.ai/agentic.config.json` already exists, show the current content and ask whether to update it. Preserve any custom values the user does not ask to change.
 
-2. **Detect the repository shape.** Resolve the default branch via the tracker **default-branch** operation (for a fresh setup with no descriptor installed yet, use the shipped `references/trackers/github.md` — or the descriptor matching the tracker the user names — and fall back to `git symbolic-ref refs/remotes/origin/HEAD`). Detect candidate validation commands, in this order of evidence:
+2. **Detect the repository shape.** Resolve the default branch via the tracker **default-branch** operation (for a fresh setup with no descriptor installed yet, use the shipped `references/trackers/github.md` — or the descriptor matching the tracker the user names — and fall back to `git symbolic-ref refs/remotes/origin/HEAD`). An `origin` on a GitLab host makes `gitlab` the default tracker. Detect candidate validation commands, in this order of evidence:
 
    1. `package.json` scripts — look for `typecheck`, `lint`, `test`, `build` (and close variants). Choose the runner from the lockfile: `pnpm-lock.yaml` → `pnpm <script>`, `package-lock.json` → `npm run <script>`, `yarn.lock` → the equivalent for that runner, `bun.lockb` → `bun run <script>`.
    2. A `Makefile` — look for `test`, `lint`, `build` targets.
@@ -109,7 +109,7 @@ Every skill in this collection checks, right after loading the config, for a rep
 
    Prefer commands mirroring what CI already runs (`.github/workflows/*.yml`).
 
-3. **Ask the user (skip with `--defaults`).** Confirm validation, tracker (`github`, `linear`, `jira`, or custom; default `github`), browser provider, label mode, QA gate, spec path, optional review checklist, and missing project docs. Full guidance: `references/interview-questions.md`.
+3. **Ask the user (skip with `--defaults`).** Confirm validation, tracker (`github`, `linear`, `jira`, `gitlab`, or custom; default per step 2), browser provider, label mode, QA gate, spec path, optional review checklist, and missing project docs. Full guidance: `references/interview-questions.md`.
 
 4. **Install the tracker descriptor.** Copy the shipped descriptor for the chosen tracker from this skill's `references/trackers/<tracker>.md` to `.ai/trackers/<tracker>.md` (create the directory). Rules:
 

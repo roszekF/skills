@@ -47,7 +47,8 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(gitlab, /(^|[`"\s])gh (api|pr|issue|label|repo|search|auth|run) /m, "gitlab: no gh CLI calls");
 
-assert.match(setup, /`github`, `linear`, `jira`, or custom/);
+assert.match(setup, /`github`, `linear`, `jira`, `gitlab`, or custom/);
+assert.match(setup, /ships `github.md`, `gitlab.md`, `linear.md`, and `jira.md`/);
 assert.match(setup, /`linear` and `jira` require `\.ai\/trackers\/github\.md`/);
 
 assert.match(linear, /requires `linear` 2\.4\.0 or newer/);
