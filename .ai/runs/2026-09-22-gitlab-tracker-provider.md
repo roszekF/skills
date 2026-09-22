@@ -65,4 +65,4 @@ Let `om-setup-agent-pipeline` install a ready-to-use `.ai/trackers/gitlab.md` th
 
 ### Phase 3: Documentation
 
-- [ ] 3.1 Update README, skill docs, decision record, and upgrade notes
+- [x] 3.1 Update README, skill docs, decision record, and upgrade notes — e931454
