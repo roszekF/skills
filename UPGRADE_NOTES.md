@@ -14,6 +14,13 @@ against them — not against the copies shipped in this repo:
 | `SDLC.md`, `CODE_REVIEW.md`, `BACKWARD_COMPATIBILITY.md`, `AGENTS.md` starter | `om-setup-agent-pipeline` | Regenerated only when missing — edit or regenerate deliberately |
 | `.ai/skills/<name>/SKILL.md` repo-local overrides | you | Never touched by upgrades; review them against new skill behavior |
 
+## 2026-09-22 — Shipped GitLab tracker provider
+
+- **GitLab repositories can run the whole pipeline.** Select `gitlab` to run issues, merge requests, reviews, CI pipelines, and labels on gitlab.com or a self-managed instance through `glab` (REST v4 via `glab api`). It is stand-alone: no `.ai/trackers/github.md` companion is installed.
+- **Setup:** install and authenticate `glab` (`glab auth login`, with `--hostname` for self-managed) and have `jq`, then re-run `/om-setup-agent-pipeline`. It defaults to `gitlab` when `origin` is on a GitLab host, installs `.ai/trackers/gitlab.md`, and offers to create the label taxonomy as project labels (group labels with the same names also satisfy the guards).
+- **What differs on GitLab**, all inside the descriptor: skills' "PR" is a merge request and `PR: #<n>` carries its iid; drafts are `Draft:` title prefixes; review verdicts are native approvals plus a marker note; comment ids are handles such as `merge_requests/12/345`; required checks are every non-`allow_failure` job of the head pipeline. `Closes #N` auto-closes only on merges into the default branch.
+- **No migration for existing repositories.** The config schema and tracker operation names are unchanged. The lint gate now also rejects direct `glab` calls in skill content outside the tracker descriptors.
+
 ## 2026-09-09 — New skill: om-mockup-prototype, neutral discovery flows
 
 `om-mockup-prototype` creates a neutral clickable prototype after the first
@@ -297,7 +304,7 @@ new behavior.
 ## Re-syncing the tracker descriptor
 
 The shipped descriptors live in `skills/om-setup-agent-pipeline/references/trackers/`
-(`github.md`, `linear.md`, `jira.md`, plus `TEMPLATE.md` for custom providers). Your installed copy is
+(`github.md`, `gitlab.md`, `linear.md`, `jira.md`, plus `TEMPLATE.md` for custom providers). Your installed copy is
 `.ai/trackers/<tracker>.md` in the consuming repository.
 
 ```bash
@@ -317,7 +324,7 @@ cp <path-to-skills>/om-setup-agent-pipeline/references/trackers/github.md .ai/tr
 Re-running `/om-setup-agent-pipeline` also refreshes the descriptor, but plain-copies it —
 prefer the diff-and-merge route when you have customized operations.
 
-For the shipped `linear` or `jira` split provider, substitute its filename in the commands
+For the shipped `gitlab` provider, substitute `gitlab.md` in the commands above; it has no companion. For the shipped `linear` or `jira` split provider, substitute its filename in the commands
 above and repeat the diff for the companion `.ai/trackers/github.md`. The primary descriptor owns
 issues; the companion owns repository, PR, review, CI, and PR-label operations, so both copies must
 stay current.
