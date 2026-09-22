@@ -21,7 +21,7 @@ Skills say "PR" throughout; on GitLab a PR is a **merge request** (MR), and `{pr
 - Comments are GitLab **notes**. System notes (label changes, pushes) are always filtered out. Because issues and MRs have separate number spaces, a comment id is a **parent-qualified handle** — `issues/<iid>/<noteId>` or `merge_requests/<iid>/<noteId>` — emitted by **list-issue-comments**, **comment-issue**, and **comment-pr**, and accepted by **get-issue-comment**, **get-pr-comment**, **get-review-comment**, and **update-comment**. A note URL maps onto a handle directly: `…/-/issues/12#note_345` → `issues/12/345`, `…/-/merge_requests/12#note_345` → `merge_requests/12/345`.
 - Operations that take "an issue or PR number" (**list-issue-comments**) need the kind: use `merge_requests` when the caller is working a PR, `issues` otherwise.
 - Claim/lock signals on an issue or MR are: assignee = the automation user, the `in-progress` label, and a `🤖`-prefixed timestamped claim note. All three are readable back through **get-issue** / **get-pr**. The `ci-monitoring` label is **not** a claim signal — it marks finished, reported work whose CI-result follow-up is still owed, and never makes another skill back off.
-- Review verdicts: GitLab's approval is native (`/approve`, `/unapprove`). GitLab has no REST verdict for "request changes" on every tier, so **review-pr** records each verdict as a note whose first line is a hidden marker — `<!-- review: APPROVED -->` or `<!-- review: CHANGES_REQUESTED -->` — and **get-pr** rebuilds `reviews` / `latestReviews` from those notes plus native approvals and reviewer states. `reviewDecision` is `CHANGES_REQUESTED` while a reviewer is in GitLab's "requested changes" state or the MR carries the `changes-requested` pipeline label, `APPROVED` when at least one approval satisfies the project's approval rules, and `REVIEW_REQUIRED` otherwise.
+- Review verdicts: GitLab's approval is native (`/approve`, `/unapprove`). GitLab has no REST verdict for "request changes" on every tier, so **review-pr** records each verdict as a note whose first line is a hidden marker — `<!-- review: APPROVED -->` or `<!-- review: CHANGES_REQUESTED -->` — and **get-pr** rebuilds `reviews` / `latestReviews` from those notes plus native approvals and reviewer states. Marker notes count only from users GitLab lists as the MR's reviewers or approvers (**review-pr** adds its user as a reviewer), so a commenter cannot forge a verdict, and an `APPROVED` marker drops out once its author's native approval is revoked (for example by "reset approvals on push"). `reviewDecision` is `CHANGES_REQUESTED` while a reviewer is in GitLab's "requested changes" state, any reviewer's latest verdict is `CHANGES_REQUESTED`, or the MR carries the `changes-requested` pipeline label; `APPROVED` when at least one approval satisfies the project's approval rules; `REVIEW_REQUIRED` otherwise.
 - CI truth for an MR comes from its **head pipeline** (**get-pr-checks**). A job with `allow_failure: true` that fails is reported as `NEUTRAL` — GitLab itself does not block the merge on it.
 - Multi-line bodies are always sent from a file through `jq --rawfile` into `glab api --input -`, so formatting survives and nothing large touches a command line.
 - Validate every externally-sourced value before interpolation: iids are numeric (`gl_iid`), `REPO` is a path (`gl_project`), comment handles match the handle shape (`gl_handle`).
@@ -63,10 +63,15 @@ gl_write() {
   glab api -X "$1" "$2" -H 'Content-Type: application/json' --input -
 }
 
-# Every page of a list endpoint, merged into one JSON array.
+# Every page of a list endpoint, merged into one JSON array. Fails when any page fails:
+# an unreadable list must never look like an empty one (e.g. "no CI jobs").
 gl_list() {
+  local sep tmp rc
   case "$1" in *\?*) sep='&' ;; *) sep='?' ;; esac
-  glab api --paginate "$1${sep}per_page=100" | jq -s 'add // []'
+  tmp=$(mktemp) || return 1
+  if ! glab api --paginate "$1${sep}per_page=100" > "$tmp"; then rm -f "$tmp"; return 1; fi
+  jq -s 'add // []' "$tmp"
+  rc=$?; rm -f "$tmp"; return "$rc"
 }
 
 # jq definitions shared by the PR, check, and CI-run mappings below.
@@ -112,11 +117,15 @@ def gl_run: {databaseId: .id, workflowName: (.source // "pipeline"), name: "pipe
 # Merge request → the GitHub-shaped PR object skills consume (field set: see get-pr).
 # $1 = MR iid. GL_PR_LIGHT=1 skips notes, commits, and diffs (list-prs uses it).
 gl_pr_json() {
+  local p t f f_path src light rc
   gl_iid "$1" || return 1
   p=$(gl_project) || return 1
   t=$(mktemp -d) || return 1
-  if ! glab api "projects/$p/merge_requests/$1" > "$t/mr"; then rm -rf "$t"; return 1; fi
-  glab api "projects/$p/merge_requests/$1/approvals" > "$t/approvals" 2>/dev/null || echo '{}' > "$t/approvals"
+  if ! glab api "projects/$p/merge_requests/$1" > "$t/mr" ||
+     ! glab api "projects/$p/merge_requests/$1/approvals" > "$t/approvals"; then
+    rm -rf "$t"; return 1
+  fi
+  # Optional surfaces: older GitLab versions lack the reviewers and closes-issues lists.
   glab api "projects/$p/merge_requests/$1/reviewers" > "$t/reviewers" 2>/dev/null || echo '[]' > "$t/reviewers"
   gl_list "projects/$p/merge_requests/$1/closes_issues" > "$t/closes" 2>/dev/null || echo '[]' > "$t/closes"
   light=false
@@ -125,9 +134,10 @@ gl_pr_json() {
     light=true
     for f in notes commits diffs; do echo '[]' > "$t/$f"; done
   else
-    gl_list "projects/$p/merge_requests/$1/notes?sort=asc" > "$t/notes"
-    gl_list "projects/$p/merge_requests/$1/commits" > "$t/commits"
-    gl_list "projects/$p/merge_requests/$1/diffs" > "$t/diffs"
+    for f in notes commits diffs; do
+      case "$f" in notes) f_path="notes?sort=asc" ;; *) f_path=$f ;; esac
+      gl_list "projects/$p/merge_requests/$1/$f_path" > "$t/$f" || { rm -rf "$t"; return 1; }
+    done
     src=$(jq -r 'if .source_project_id != .target_project_id then .source_project_id else empty end' "$t/mr")
     if [ -n "$src" ]; then
       glab api "projects/$src" > "$t/source" 2>/dev/null || echo null > "$t/source"
@@ -143,7 +153,11 @@ gl_pr_json() {
     | ($m.references.full // "" | sub("!\\d+$"; "")) as $target
     | (if $m.source_project_id != $m.target_project_id then ($source[0].path_with_namespace // null) else $target end) as $head
     | [$diffs[0][] | {path: .new_path, additions: count("+"), deletions: count("-")}] as $files
+    | ([$rv[].user.username] + [($a.approved_by // [])[].user.username]) as $trusted
+    | [($a.approved_by // [])[].user.username] as $approvers
     | [$notes[0][] | select(.system | not) | select(gl_review_state != null)
+        | select(.author.username as $u | $trusted | index([$u]))
+        | select(gl_review_state == "CHANGES_REQUESTED" or (.author.username as $u | $approvers | index([$u])))
         | {id: "\($k)/\(.id)", author: {login: .author.username}, state: gl_review_state, body, submittedAt: .created_at}] as $marked
     | ($marked
        + [$rv[] | select(.state == "requested_changes") | .user.username as $u
@@ -153,11 +167,12 @@ gl_pr_json() {
           | select([$marked[] | select(.author.login == $u and .state == "APPROVED")] | length == 0)
           | {id: null, author: {login: $u}, state: "APPROVED", body: "", submittedAt: null}]
       ) as $reviews
+    | ($reviews | group_by(.author.login) | map(sort_by(.submittedAt // "") | last)) as $latest
     | {
         number: $m.iid, title: $m.title, url: $m.web_url, body: ($m.description // ""),
         state: ($m.state | gl_state), author: {login: $m.author.username},
         isDraft: ($m.draft // $m.work_in_progress // false),
-        baseRefName: $m.target_branch, baseRefOid: ($m.diff_refs.base_sha // null),
+        baseRefName: $m.target_branch, baseRefOid: ($m.diff_refs.start_sha // $m.diff_refs.base_sha // null),
         headRefName: $m.source_branch, headRefOid: $m.sha,
         headRepository: {nameWithOwner: $head},
         headRepositoryOwner: {login: (if $head then ($head | sub("/[^/]+$"; "")) else null end)},
@@ -165,16 +180,18 @@ gl_pr_json() {
         maintainerCanModify: ($m.allow_collaboration // false),
         mergeable: ($m | gl_mergeable), mergeStateStatus: ($m | gl_merge_state),
         reviewDecision: (
-          if any($rv[]; .state == "requested_changes") or any($m.labels[]; . == "changes-requested") then "CHANGES_REQUESTED"
+          if any($rv[]; .state == "requested_changes") or any($latest[]; .state == "CHANGES_REQUESTED")
+             or any($m.labels[]; . == "changes-requested") then "CHANGES_REQUESTED"
           elif ($a.approved // false) and (($a.approved_by // []) | length > 0) then "APPROVED"
           else "REVIEW_REQUIRED" end),
         labels: [$m.labels[] | {name: .}],
         assignees: [($m.assignees // [])[] | {login: .username}],
         reviews: ($reviews | sort_by(.submittedAt // "")),
-        latestReviews: ($reviews | group_by(.author.login) | map(sort_by(.submittedAt // "") | last)),
+        latestReviews: $latest,
         commits: [$commits[0][] | {oid: .id, messageHeadline: .title, authoredDate: .authored_date}],
         files: $files,
-        comments: [$notes[0][] | select((.system | not) and .type != "DiffNote" and gl_review_state == null)
+        comments: [$notes[0][] | select((.system | not) and .type != "DiffNote")
+          | select("\($k)/\(.id)" as $id | [$marked[].id] | index([$id]) | not)
           | {id: "\($k)/\(.id)", author: {login: .author.username}, body, createdAt: .created_at, url: "\($m.web_url)#note_\(.id)"}],
         closingIssuesReferences: [$closes[0][] | {number: .iid, url: .web_url}],
         createdAt: $m.created_at, updatedAt: $m.updated_at, mergedAt: $m.merged_at, closedAt: $m.closed_at,
@@ -182,9 +199,9 @@ gl_pr_json() {
         additions: (if $light then null else ([$files[].additions] | add // 0) end),
         changedFiles: (if $light then ($m.changes_count // null | tostring | tonumber? // null) else ($files | length) end)
       }'
-  status=$?
+  rc=$?
   rm -rf "$t"
-  return "$status"
+  return "$rc"
 }
 ```
 
@@ -193,8 +210,11 @@ gl_pr_json() {
 Every label mutation goes through an existence guard so a missing label degrades to a logged skip instead of a failure, and `labels.enabled: false` in the config skips label operations entirely. The guards mutate with `add_labels` / `remove_labels` on the MR or issue itself, which changes only those labels. The project label list includes labels inherited from parent groups, so group-level labels satisfy the guard. GitLab separates label names with commas in these fields, so a label containing a comma is skipped.
 
 ```bash
+# 0 = exists, 1 = missing, 2 = the label list could not be read (never treated as missing).
 label_exists() {
-  gl_list "projects/$(gl_project)/labels" | jq -e --arg l "$1" 'any(.[]; .name == $l)' >/dev/null
+  local labels
+  labels=$(gl_list "projects/$(gl_project)/labels") || { echo "Could not read GitLab labels" >&2; return 2; }
+  printf '%s' "$labels" | jq -e --arg l "$1" 'any(.[]; .name == $l)' >/dev/null
 }
 
 # $1 = add|remove, $2 = label, $3 = issues|merge_requests, $4 = iid.
@@ -208,22 +228,24 @@ gl_label() {
 apply_label() {
   if [ "$LABELS_ENABLED" != "true" ]; then return 0; fi
   case "$1" in *,*) echo "Skipping label '$1' (GitLab label fields are comma-separated)."; return 0 ;; esac
-  if label_exists "$1"; then
-    gl_label add "$1" merge_requests "$2"
-  else
-    echo "Skipping label '$1' (not defined in this project or its groups). Create it with the create-label operation."
-  fi
+  label_exists "$1"
+  case $? in
+    0) gl_label add "$1" merge_requests "$2" ;;
+    1) echo "Skipping label '$1' (not defined in this project or its groups). Create it with the create-label operation." ;;
+    *) return 1 ;;
+  esac
 }
 
 # Issue labels. $1 = label, $2 = issue iid.
 apply_issue_label() {
   if [ "$LABELS_ENABLED" != "true" ]; then return 0; fi
   case "$1" in *,*) echo "Skipping label '$1' (GitLab label fields are comma-separated)."; return 0 ;; esac
-  if label_exists "$1"; then
-    gl_label add "$1" issues "$2"
-  else
-    echo "Skipping label '$1' (not defined in this project or its groups). Create it with the create-label operation."
-  fi
+  label_exists "$1"
+  case $? in
+    0) gl_label add "$1" issues "$2" ;;
+    1) echo "Skipping label '$1' (not defined in this project or its groups). Create it with the create-label operation." ;;
+    *) return 1 ;;
+  esac
 }
 
 # Removal. Removing a label that is not applied is a no-op, not a failure.
@@ -306,11 +328,12 @@ BASE_BRANCH=$(glab api "projects/$(gl_project)" 2>/dev/null | jq -r '.default_br
 `{issueId}`, field list → issue data in the same shape as `github.md` (`state` is `OPEN`/`CLOSED`; comments carry note handles).
 ```bash
 gl_issue_json() {
+  local p t rc
   gl_iid "$1" || return 1
   p=$(gl_project) || return 1
   t=$(mktemp -d) || return 1
   glab api "projects/$p/issues/$1" > "$t/issue" || { rm -rf "$t"; return 1; }
-  gl_list "projects/$p/issues/$1/notes?sort=asc" > "$t/notes"
+  gl_list "projects/$p/issues/$1/notes?sort=asc" > "$t/notes" || { rm -rf "$t"; return 1; }
   jq -n --slurpfile i "$t/issue" --slurpfile n "$t/notes" '
     $i[0] as $x | {
       number: $x.iid, title: $x.title, body: ($x.description // ""),
@@ -321,16 +344,17 @@ gl_issue_json() {
       comments: [$n[0][] | select(.system | not)
         | {id: "issues/\($x.iid)/\(.id)", author: {login: .author.username}, body, createdAt: .created_at, url: "\($x.web_url)#note_\(.id)"}]
     }'
-  status=$?; rm -rf "$t"; return "$status"
+  rc=$?; rm -rf "$t"; return "$rc"
 }
 gl_issue_json {issueId}
 ```
 
 #### search-issues
-Query and state (`opened`, `closed`, or omit for all) → matching issues. Searches title and description.
+Query and state (`opened`, `closed`, or `all`) → matching issues. Searches title and description.
 ```bash
 Q=$(printf '%s' "<query>" | jq -sRr @uri)
-glab api "projects/$(gl_project)/issues?state=opened&in=title,description&search=${Q}&per_page=100" \
+STATE=opened   # opened | closed | all
+glab api "projects/$(gl_project)/issues?state=${STATE}&in=title,description&search=${Q}&per_page=100" \
   | jq '[.[] | {number: .iid, title, url: .web_url, state: (if .state == "opened" then "OPEN" else "CLOSED" end)}]'
 ```
 
@@ -375,12 +399,13 @@ jq -n --rawfile d <body-file> '{description: $d}' | gl_write PUT "projects/$(gl_
 ```bash
 # $1 = issues|merge_requests, $2 = iid, $3 = add|remove, $4 = username.
 gl_assign() {
+  local p uid ids
   gl_iid "$2" || return 1
   p=$(gl_project) || return 1
   uid=$(glab api "users?username=$(printf '%s' "$4" | jq -sRr @uri)" | jq -r '.[0].id // empty')
   [ -n "$uid" ] || { echo "Unknown GitLab user: $4" >&2; return 1; }
   ids=$(glab api "projects/$p/$1/$2" | jq -c --argjson u "$uid" --arg op "$3" \
-    '[(.assignees // [])[].id] | if $op == "add" then (. + [$u] | unique) else map(select(. != $u)) end')
+    '[(.assignees // [])[].id] | if $op == "add" then (if index([$u]) then . else . + [$u] end) else map(select(. != $u)) end')
   jq -n --argjson ids "$ids" '{assignee_ids: $ids}' | gl_write PUT "projects/$p/$1/$2" >/dev/null
   if glab api "projects/$p/$1/$2" | jq -e --arg u "$4" 'any((.assignees // [])[]; .username == $u)' >/dev/null; then
     [ "$3" = add ] || { echo "GitLab still lists $4 as an assignee of $1/$2" >&2; return 1; }
@@ -399,6 +424,7 @@ Always through the guards: `apply_issue_label "<label>" {issueId}` / `remove_iss
 Comment handle → body, author, URL.
 ```bash
 gl_get_comment() {
+  local p web
   gl_handle "$1" || return 1
   p=$(gl_project) || return 1
   web=$(glab api "projects/$p/${1%/*}" | jq -r '.web_url')
@@ -438,10 +464,11 @@ gl_pr_json {prNumber} | jq '{number, title, url, state, isDraft, labels, reviewD
 Mapping notes: `mergeable` / `mergeStateStatus` derive from GitLab's `detailed_merge_status` (`mergeable` → `CLEAN`, `conflict` → `DIRTY`, `need_rebase` → `BEHIND`, `draft_status` → `DRAFT`, still computing → `UNKNOWN`, every other blocker → `BLOCKED`). `files` carries per-file `additions`/`deletions` counted from the MR diffs; `additions` sums them and `changedFiles` counts them. GitLab collapses very large diffs, which then count as zero — when the size matters, fetch the branch with **checkout-pr** and use `git diff --shortstat`. `commits` carries `oid`, `messageHeadline`, and `authoredDate`. `closingIssuesReferences` comes from GitLab's own closes-issues list.
 
 #### list-prs
-State (`opened`, `merged`, `closed`, `all`), optional search text and date bound, limit (≤100) → PRs in the **get-pr** shape, without the heavy fields (`reviews`, `latestReviews`, `commits`, `files`, `comments`, and `additions` are empty or null — call **get-pr** for them). GitLab's `closed` state already means closed without merging.
+State (`opened`, `merged`, `closed`, `all`), optional search text and date bound, limit (≤100) → PRs in the **get-pr** shape, without the heavy fields (`reviews`, `latestReviews`, `commits`, `files`, `comments`, and `additions` are empty or null — call **get-pr** for them). GitLab's `closed` state already means closed without merging. Cost: four API calls per MR (the MR, approvals, reviewers, closes-issues), so keep `limit` as small as the caller needs on gitlab.com's rate limits.
 ```bash
 # $1 = state, $2 = limit, $3 = optional updated-after ISO date, $4 = optional search text.
 gl_list_prs() {
+  local q
   q="projects/$(gl_project)/merge_requests?state=$1&order_by=updated_at&sort=desc&per_page=${2:-100}"
   [ -n "${3:-}" ] && q="$q&updated_after=$3"
   [ -n "${4:-}" ] && q="$q&search=$(printf '%s' "$4" | jq -sRr @uri)"
@@ -456,6 +483,7 @@ gl_list_prs closed {limit} "${SINCE_DATE}" | jq --arg d "${SINCE_DATE}" '[.[] | 
 Free-text query and state (`opened`, `merged`, `closed`, `all`) → matching PRs. An issue reference (`#123`) uses GitLab's related-merge-requests list for that issue, which finds MRs that mention or close it; any other query (a plan path, a slug) searches MR titles and descriptions.
 ```bash
 gl_search_prs() {
+  local p
   p=$(gl_project) || return 1
   case "$1" in
     \#*)
@@ -516,16 +544,18 @@ glab api "projects/$P/repository/branches/${EVIDENCE_BRANCH}" >/dev/null 2>&1 ||
 # Image bytes never touch a command line: base64 goes to a temp file that jq reads.
 BODY_IMAGES=""
 EV_TMP=$(mktemp)
-for img in <image-paths>; do
-  path="{slug}/$(basename "$img")"
+for img in "<image-path>" "<image-path>"; do   # one quoted argument per image
+  name=$(basename "$img")
+  path="{slug}/${name}"
   enc_path=$(printf '%s' "$path" | jq -sRr @uri)
+  enc_name=$(printf '%s' "$name" | jq -sRr @uri)
   base64 < "$img" | tr -d '\n' > "$EV_TMP"
   jq -n --rawfile c "$EV_TMP" --arg b "$EVIDENCE_BRANCH" --arg m "qa evidence {slug}" \
     '{branch: $b, encoding: "base64", content: $c, commit_message: $m}' > "$EV_TMP.json"
   gl_write POST "projects/$P/repository/files/${enc_path}" < "$EV_TMP.json" >/dev/null 2>&1 ||
     gl_write PUT "projects/$P/repository/files/${enc_path}" < "$EV_TMP.json" >/dev/null
   BODY_IMAGES="${BODY_IMAGES}
-![$(basename "$img")](${WEB}/-/raw/${EVIDENCE_BRANCH}/${path})"
+![${name}](${WEB}/-/raw/${EVIDENCE_BRANCH}/{slug}/${enc_name})"
 done
 rm -f "$EV_TMP" "$EV_TMP.json"
 
@@ -573,8 +603,14 @@ To push fixes to a fork MR, push to the source project's repository URL and `hea
 `{prNumber}`, verdict (approve / request changes), body file. Approving is GitLab's native approval; requesting changes revokes this user's approval, if any. Both then post the review body as a note that opens with the hidden verdict marker (see Conventions), which is how **get-pr** reads the verdict back.
 ```bash
 gl_review() {
+  local p me ids marker
   gl_iid "$1" || return 1
   p=$(gl_project) || return 1
+  # Become a listed reviewer first: get-pr trusts verdict markers only from reviewers/approvers.
+  me=$(glab api user | jq '.id') || return 1
+  ids=$(glab api "projects/$p/merge_requests/$1" | jq -c --argjson u "$me" \
+    '[(.reviewers // [])[].id] | if index([$u]) then . else . + [$u] end') || return 1
+  jq -n --argjson ids "$ids" '{reviewer_ids: $ids}' | gl_write PUT "projects/$p/merge_requests/$1" >/dev/null || return 1
   case "$2" in
     approve)
       glab api -X POST "projects/$p/merge_requests/$1/approve" >/dev/null || {
@@ -596,13 +632,15 @@ gl_review {prNumber} request-changes <body-file>
 Surface a refused self-approval instead of working around it, exactly as on GitHub.
 
 #### merge-pr
-`{prNumber}`; squash by default. Auto-merge (merge once the pipeline succeeds) only when the skill asks for it; delete the source branch only when asked.
+`{prNumber}` and the `headRefOid` the caller's merge gate checked; squash by default. Passing that SHA makes GitLab refuse the merge if a newer commit landed after the gate, so unverified code never merges. Auto-merge (merge once the pipeline succeeds) only when the skill asks for it; delete the source branch only when asked.
 ```bash
 gl_iid {prNumber}
-jq -n '{squash: true}' | gl_write PUT "projects/$(gl_project)/merge_requests/{prNumber}/merge" | jq -e '.state == "merged"' >/dev/null
-jq -n '{squash: true, merge_when_pipeline_succeeds: true}' | gl_write PUT "projects/$(gl_project)/merge_requests/{prNumber}/merge" >/dev/null   # auto-merge
+jq -n --arg sha "<headRefOid>" '{squash: true, sha: $sha}' \
+  | gl_write PUT "projects/$(gl_project)/merge_requests/{prNumber}/merge" | jq -e '.state == "merged"' >/dev/null
+jq -n --arg sha "<headRefOid>" '{squash: true, sha: $sha, merge_when_pipeline_succeeds: true}' \
+  | gl_write PUT "projects/$(gl_project)/merge_requests/{prNumber}/merge" >/dev/null   # auto-merge
 ```
-A project whose squash setting is "Do not allow" rejects `squash: true`; surface that rather than merging differently.
+A project whose squash setting is "Do not allow" rejects `squash: true`, and a moved head answers 409; surface either rather than merging differently. Recent GitLab versions also accept `auto_merge: true` in place of the older `merge_when_pipeline_succeeds`.
 
 #### mark-pr-ready
 Promote a draft MR by stripping the draft prefix from its title, then read it back.
@@ -618,16 +656,22 @@ glab api "projects/$(gl_project)/merge_requests/{prNumber}" | jq -e '(.draft // 
 `{prNumber}` → the jobs and downstream-pipeline bridges of the MR's head pipeline, with `name`, `state`, `bucket` (`pass`/`fail`/`pending`/`skipping`/`cancel`, the same buckets `github.md` reports), `link`, and the stage as `workflow`. No head pipeline means no CI ran: an empty list.
 ```bash
 gl_pr_checks() {
+  local p head pid pp jobs bridges
   gl_iid "$1" || return 1
   p=$(gl_project) || return 1
-  pid=$(glab api "projects/$p/merge_requests/$1" | jq -r '.head_pipeline.id // empty')
+  head=$(glab api "projects/$p/merge_requests/$1" | jq -c '.head_pipeline // {}') || return 1
+  pid=$(printf '%s' "$head" | jq -r '.id // empty')
   [ -n "$pid" ] || { echo '[]'; return 0; }
-  { gl_list "projects/$p/pipelines/$pid/jobs"; gl_list "projects/$p/pipelines/$pid/bridges"; } \
-    | jq -s "$GL_JQ_DEFS"'add | map(gl_check)'
+  # A fork MR's pipeline usually runs in the source project: address the pipeline's own project.
+  pp=$(printf '%s' "$head" | jq -r '.project_id // empty')
+  case "$pp" in ''|*[!0-9]*) pp=$p ;; esac
+  jobs=$(gl_list "projects/$pp/pipelines/$pid/jobs") || { echo "Could not read jobs of pipeline $pid" >&2; return 1; }
+  bridges=$(gl_list "projects/$pp/pipelines/$pid/bridges" 2>/dev/null) || bridges='[]'
+  printf '%s\n%s\n' "$jobs" "$bridges" | jq -s "$GL_JQ_DEFS"'add | map(gl_check)'
 }
 gl_pr_checks {prNumber}
 ```
-A failed job marked `allow_failure: true` reports `NEUTRAL` (bucket `pass`); a manual job reports `PENDING` only when it blocks the pipeline.
+A failed job marked `allow_failure: true` reports `NEUTRAL` (bucket `pass`); a manual job reports `PENDING` only when it blocks the pipeline. A job list that cannot be read is an error, never an empty list — an empty list means "no CI ran", which a merge gate would read as nothing to wait for.
 
 #### get-required-checks
 GitLab has no per-branch list of required checks. The merge rule is the project's "Pipelines must succeed" setting, which a failing non-`allow_failure` job violates. This operation therefore prints no check names — the contract's "unreadable" case — and every check **get-pr-checks** reports counts as required. Allow-failure jobs are already `NEUTRAL` there, so they never block. Print the project setting for the record:
@@ -729,7 +773,8 @@ gl_create_label "<name>" "#<hex>" "<description>"
 #### ensure-label-taxonomy
 Create every label from the config's taxonomy that does not exist yet (used by `om-setup-agent-pipeline`; skips ones **list-labels** already returns):
 ```bash
-EXISTING=$(gl_list "projects/$(gl_project)/labels" | jq -r '.[].name')
+EXISTING=$(gl_list "projects/$(gl_project)/labels") || { echo "Could not read GitLab labels" >&2; exit 1; }
+EXISTING=$(printf '%s' "$EXISTING" | jq -r '.[].name')
 while IFS='|' read -r name color description; do
   [ -n "$name" ] || continue
   printf '%s\n' "$EXISTING" | grep -Fxq "$name" || gl_create_label "$name" "$color" "$description"
