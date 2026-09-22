@@ -54,8 +54,8 @@ Let `om-setup-agent-pipeline` install a ready-to-use `.ai/trackers/gitlab.md` th
 
 ### Phase 1: GitLab descriptor
 
-- [ ] 1.1 Add the GitLab tracker descriptor implementing every operation through glab api
-- [ ] 1.2 Add GitLab descriptor contract tests with a stubbed glab
+- [x] 1.1 Add the GitLab tracker descriptor implementing every operation through glab api — eeb9e37
+- [x] 1.2 Add GitLab descriptor contract tests with a stubbed glab — b8b7f7c
 
 ### Phase 2: Setup and skill integration
 
