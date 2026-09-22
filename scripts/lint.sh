@@ -162,13 +162,18 @@ for pattern in "${patterns[@]}"; do
   fi
 done
 
-# Tracker-abstraction gate: no direct gh CLI usage inside skills — all tracker
-# operations go through the descriptor layer. The shipped descriptors under
-# references/trackers/ are the one place gh commands belong.
+# Tracker-abstraction gate: no direct gh or glab CLI usage inside skills — all
+# tracker operations go through the descriptor layer. The shipped descriptors
+# under references/trackers/ are the one place code-host CLI commands belong.
 gh_hits=$(grep -rEn '(^|[`"[:space:]])gh (api|pr|issue|label|repo|search|auth|run) ' skills/ 2>/dev/null | grep -v 'references/trackers/' || true)
 if [ -n "$gh_hits" ]; then
   err "direct gh CLI usage found outside references/trackers/ (use a tracker operation instead):"
   printf '%s\n' "$gh_hits" >&2
+fi
+glab_hits=$(grep -rEn '(^|[`"[:space:]])glab (api|mr|issue|label|repo|auth|ci|release) ' skills/ 2>/dev/null | grep -v 'references/trackers/' || true)
+if [ -n "$glab_hits" ]; then
+  err "direct glab CLI usage found outside references/trackers/ (use a tracker operation instead):"
+  printf '%s\n' "$glab_hits" >&2
 fi
 
 if [ "$fail" -ne 0 ]; then
