@@ -50,6 +50,8 @@ Let `om-setup-agent-pipeline` install a ready-to-use `.ai/trackers/gitlab.md` th
 
 ## Progress
 
+PR: #119
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: GitLab descriptor
@@ -57,6 +59,7 @@ Let `om-setup-agent-pipeline` install a ready-to-use `.ai/trackers/gitlab.md` th
 - [x] 1.1 Add the GitLab tracker descriptor implementing every operation through glab api — eeb9e37
 - [x] 1.2 Add GitLab descriptor contract tests with a stubbed glab — b8b7f7c
 - [x] Post-review fix: fail on unreadable lists, trust verdict markers only from reviewers/approvers, honour CHANGES_REQUESTED verdicts, keep Free-tier assignee order, read fork pipelines from their project, pin the merge SHA — 6d65dd3
+- [x] Review autofix (PR #119): route every GitLab read through gl_get so a failed request is never read as an empty answer — 4425ceb
 
 ### Phase 2: Setup and skill integration
 
