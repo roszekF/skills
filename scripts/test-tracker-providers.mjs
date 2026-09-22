@@ -280,6 +280,22 @@ try {
   assert.equal(unreadable.writes.length, 0);
   writeFileSync(fixturesFile, JSON.stringify(fixtures));
 
+  // Reads that answer "none found" must fail when the request fails, not look empty.
+  const noSearch = withFixtures({}, 'gl_search_prs "docs/runs/plan.md" opened');
+  assert.notEqual(noSearch.status, 0, "a failed search must not read as no matching PR");
+  assert.equal(noSearch.stdout, "");
+  const noMr = { ...fixtures };
+  delete noMr[`GET ${P}/merge_requests/7`];
+  writeFileSync(fixturesFile, JSON.stringify(noMr));
+  const checksWithoutMr = runGitlab("gl_pr_checks 7");
+  assert.notEqual(checksWithoutMr.status, 0, "an unreadable MR must not read as no CI");
+  assert.equal(checksWithoutMr.stdout, "");
+  writeFileSync(fixturesFile, JSON.stringify(fixtures));
+  const listed = withFixtures({ [`GET ${P}/merge_requests`]: [{ iid: 7 }] }, "gl_list_prs opened 10");
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.deepEqual(JSON.parse(listed.stdout).map((item) => item.number), [7]);
+  assert.notEqual(runGitlab("gl_list_prs opened 10").status, 0, "a failed MR list must not read as no open PRs");
+
   // Claims append to the assignee list in order, never displacing the existing assignee.
   const assign = runGitlab("gl_assign issues 3 add bot");
   assert.deepEqual(JSON.parse(assign.writes[0].body), { assignee_ids: [5, 1] });

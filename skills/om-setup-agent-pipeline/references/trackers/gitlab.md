@@ -23,6 +23,7 @@ Skills say "PR" throughout; on GitLab a PR is a **merge request** (MR), and `{pr
 - Claim/lock signals on an issue or MR are: assignee = the automation user, the `in-progress` label, and a `🤖`-prefixed timestamped claim note. All three are readable back through **get-issue** / **get-pr**. The `ci-monitoring` label is **not** a claim signal — it marks finished, reported work whose CI-result follow-up is still owed, and never makes another skill back off.
 - Review verdicts: GitLab's approval is native (`/approve`, `/unapprove`). GitLab has no REST verdict for "request changes" on every tier, so **review-pr** records each verdict as a note whose first line is a hidden marker — `<!-- review: APPROVED -->` or `<!-- review: CHANGES_REQUESTED -->` — and **get-pr** rebuilds `reviews` / `latestReviews` from those notes plus native approvals and reviewer states. Marker notes count only from users GitLab lists as the MR's reviewers or approvers (**review-pr** adds its user as a reviewer), so a commenter cannot forge a verdict, and an `APPROVED` marker drops out once its author's native approval is revoked (for example by "reset approvals on push"). `reviewDecision` is `CHANGES_REQUESTED` while a reviewer is in GitLab's "requested changes" state, any reviewer's latest verdict is `CHANGES_REQUESTED`, or the MR carries the `changes-requested` pipeline label; `APPROVED` when at least one approval satisfies the project's approval rules; `REVIEW_REQUIRED` otherwise.
 - CI truth for an MR comes from its **head pipeline** (**get-pr-checks**). A job with `allow_failure: true` that fails is reported as `NEUTRAL` — GitLab itself does not block the merge on it.
+- A read that fails is an error, never an empty answer: reads go through `gl_get` / `gl_list`, which fail when the request fails. Never pipe `glab api` straight into `jq` — without `pipefail` the pipeline reports `jq`'s status, so a failed search would read as "no matching PR" and a failed CI lookup as "no CI".
 - Multi-line bodies are always sent from a file through `jq --rawfile` into `glab api --input -`, so formatting survives and nothing large touches a command line.
 - Validate every externally-sourced value before interpolation: iids are numeric (`gl_iid`), `REPO` is a path (`gl_project`), comment handles match the handle shape (`gl_handle`).
 
@@ -56,6 +57,16 @@ gl_handle() {
       rest=${1#*/}; case "${rest%/*}" in ''|*[!0-9]*) ;; *) return 0 ;; esac ;;
   esac
   echo "Invalid GitLab comment handle: $1" >&2; return 1
+}
+
+# JSON read. $1 = API path; remaining arguments go to jq. Fails when the request fails —
+# never pipe `glab api` straight into jq: without pipefail the pipeline reports jq's status,
+# and jq on empty input succeeds, so a failed request would read as an empty answer.
+gl_get() {
+  local path resp
+  path=$1; shift
+  resp=$(glab api "$path") || { echo "GitLab API request failed: $path" >&2; return 1; }
+  printf '%s' "$resp" | jq "$@"
 }
 
 # JSON write. $1 = HTTP method, $2 = API path; the JSON body is read from stdin.
@@ -303,21 +314,21 @@ gitlab_tracker_auth_check
 #### current-user
 → the automation user's username.
 ```bash
-CURRENT_USER=$(glab api user | jq -r '.username')
+CURRENT_USER=$(gl_get user -r '.username')
 [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != null ] || { echo "Could not resolve the GitLab automation user" >&2; exit 1; }
 ```
 
 #### repo-info
 → full project path (`group/subgroup/project`), default branch, and web URL.
 ```bash
-glab api "projects/$(gl_project)" | jq '{nameWithOwner: .path_with_namespace, defaultBranch: .default_branch, url: .web_url, visibility}'
-REPO=$(glab api "projects/$(gl_project)" | jq -r '.path_with_namespace')
+gl_get "projects/$(gl_project)" '{nameWithOwner: .path_with_namespace, defaultBranch: .default_branch, url: .web_url, visibility}'
+REPO=$(gl_get "projects/$(gl_project)" -r '.path_with_namespace')
 ```
 
 #### default-branch
 → the project's default branch (used when the config's `baseBranch` is `"auto"`).
 ```bash
-BASE_BRANCH=$(glab api "projects/$(gl_project)" 2>/dev/null | jq -r '.default_branch // empty')
+BASE_BRANCH=$(gl_get "projects/$(gl_project)" 2>/dev/null -r '.default_branch // empty')
 [ -z "$BASE_BRANCH" ] && BASE_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
 [ -z "$BASE_BRANCH" ] && BASE_BRANCH="main"
 ```
@@ -354,14 +365,14 @@ Query and state (`opened`, `closed`, or `all`) → matching issues. Searches tit
 ```bash
 Q=$(printf '%s' "<query>" | jq -sRr @uri)
 STATE=opened   # opened | closed | all
-glab api "projects/$(gl_project)/issues?state=${STATE}&in=title,description&search=${Q}&per_page=100" \
-  | jq '[.[] | {number: .iid, title, url: .web_url, state: (if .state == "opened" then "OPEN" else "CLOSED" end)}]'
+gl_get "projects/$(gl_project)/issues?state=${STATE}&in=title,description&search=${Q}&per_page=100" \
+  '[.[] | {number: .iid, title, url: .web_url, state: (if .state == "opened" then "OPEN" else "CLOSED" end)}]'
 ```
 
 #### create-issue
 Title, body file, assignee, labels → created issue URL. Labels are applied **after** creation through the guard: GitLab silently creates any unknown label passed at creation time, which would bypass the taxonomy.
 ```bash
-ASSIGNEE_ID=$(glab api "users?username=$(printf '%s' "<username>" | jq -sRr @uri)" | jq -r '.[0].id // empty')
+ASSIGNEE_ID=$(gl_get "users?username=$(printf '%s' "<username>" | jq -sRr @uri)" -r '.[0].id // empty') || exit 1
 ISSUE=$(jq -n --arg t "<title>" --rawfile d <body-file> --arg a "$ASSIGNEE_ID" \
   '{title: $t, description: $d} + (if $a == "" then {} else {assignee_ids: [($a | tonumber)]} end)' \
   | gl_write POST "projects/$(gl_project)/issues")
@@ -399,15 +410,16 @@ jq -n --rawfile d <body-file> '{description: $d}' | gl_write PUT "projects/$(gl_
 ```bash
 # $1 = issues|merge_requests, $2 = iid, $3 = add|remove, $4 = username.
 gl_assign() {
-  local p uid ids
+  local p uid ids now
   gl_iid "$2" || return 1
   p=$(gl_project) || return 1
-  uid=$(glab api "users?username=$(printf '%s' "$4" | jq -sRr @uri)" | jq -r '.[0].id // empty')
+  uid=$(gl_get "users?username=$(printf '%s' "$4" | jq -sRr @uri)" -r '.[0].id // empty') || return 1
   [ -n "$uid" ] || { echo "Unknown GitLab user: $4" >&2; return 1; }
-  ids=$(glab api "projects/$p/$1/$2" | jq -c --argjson u "$uid" --arg op "$3" \
+  ids=$(gl_get "projects/$p/$1/$2" -c --argjson u "$uid" --arg op "$3" \
     '[(.assignees // [])[].id] | if $op == "add" then (if index([$u]) then . else . + [$u] end) else map(select(. != $u)) end')
   jq -n --argjson ids "$ids" '{assignee_ids: $ids}' | gl_write PUT "projects/$p/$1/$2" >/dev/null
-  if glab api "projects/$p/$1/$2" | jq -e --arg u "$4" 'any((.assignees // [])[]; .username == $u)' >/dev/null; then
+  now=$(gl_get "projects/$p/$1/$2" -c '[(.assignees // [])[].username]') || return 1
+  if printf '%s' "$now" | jq -e --arg u "$4" 'index([$u])' >/dev/null; then
     [ "$3" = add ] || { echo "GitLab still lists $4 as an assignee of $1/$2" >&2; return 1; }
   else
     [ "$3" = remove ] || echo "GitLab did not add $4 as an assignee of $1/$2 (the single Free-tier assignee slot is taken); relying on the label and claim note."
@@ -427,8 +439,8 @@ gl_get_comment() {
   local p web
   gl_handle "$1" || return 1
   p=$(gl_project) || return 1
-  web=$(glab api "projects/$p/${1%/*}" | jq -r '.web_url')
-  glab api "projects/$p/${1%/*}/notes/${1##*/}" | jq --arg u "$web#note_${1##*/}" '{body, user: .author.username, url: $u}'
+  web=$(gl_get "projects/$p/${1%/*}" -r '.web_url')
+  gl_get "projects/$p/${1%/*}/notes/${1##*/}" --arg u "$web#note_${1##*/}" '{body, user: .author.username, url: $u}'
 }
 gl_get_comment {commentHandle}
 ```
@@ -468,11 +480,13 @@ State (`opened`, `merged`, `closed`, `all`), optional search text and date bound
 ```bash
 # $1 = state, $2 = limit, $3 = optional updated-after ISO date, $4 = optional search text.
 gl_list_prs() {
-  local q
+  local q iids out iid
   q="projects/$(gl_project)/merge_requests?state=$1&order_by=updated_at&sort=desc&per_page=${2:-100}"
   [ -n "${3:-}" ] && q="$q&updated_after=$3"
   [ -n "${4:-}" ] && q="$q&search=$(printf '%s' "$4" | jq -sRr @uri)"
-  glab api "$q" | jq -r '.[].iid' | while read -r iid; do GL_PR_LIGHT=1 gl_pr_json "$iid"; done | jq -s '.'
+  iids=$(gl_get "$q" -r '.[].iid') || return 1
+  out=$(for iid in $iids; do GL_PR_LIGHT=1 gl_pr_json "$iid" || exit 1; done) || return 1
+  printf '%s' "$out" | jq -s '.'
 }
 gl_list_prs opened 100
 gl_list_prs merged {limit} "${SINCE_DATE}" | jq --arg d "${SINCE_DATE}" '[.[] | select(.mergedAt >= $d)]'
@@ -483,16 +497,17 @@ gl_list_prs closed {limit} "${SINCE_DATE}" | jq --arg d "${SINCE_DATE}" '[.[] | 
 Free-text query and state (`opened`, `merged`, `closed`, `all`) → matching PRs. An issue reference (`#123`) uses GitLab's related-merge-requests list for that issue, which finds MRs that mention or close it; any other query (a plan path, a slug) searches MR titles and descriptions.
 ```bash
 gl_search_prs() {
-  local p
+  local p found
   p=$(gl_project) || return 1
   case "$1" in
     \#*)
       gl_iid "${1#\#}" || return 1
-      gl_list "projects/$p/issues/${1#\#}/related_merge_requests" \
-        | jq --arg s "$2" '[.[] | select($s == "all" or .state == $s)]' ;;
+      found=$(gl_list "projects/$p/issues/${1#\#}/related_merge_requests") || return 1
+      found=$(printf '%s' "$found" | jq --arg s "$2" '[.[] | select($s == "all" or .state == $s)]') ;;
     *)
-      glab api "projects/$p/merge_requests?state=$2&in=title,description&search=$(printf '%s' "$1" | jq -sRr @uri)&per_page=100" ;;
-  esac | jq "$GL_JQ_DEFS"'[.[] | {number: .iid, title, url: .web_url, state: (.state | gl_state)}]'
+      found=$(gl_get "projects/$p/merge_requests?state=$2&in=title,description&search=$(printf '%s' "$1" | jq -sRr @uri)&per_page=100" '.') || return 1 ;;
+  esac
+  printf '%s' "$found" | jq "$GL_JQ_DEFS"'[.[] | {number: .iid, title, url: .web_url, state: (.state | gl_state)}]'
 }
 gl_search_prs "#{issueId}" opened
 ```
@@ -512,7 +527,7 @@ PR_NUMBER=$(printf '%s' "$PR" | jq -r '.iid')
 `{prNumber}`, new title and/or body file → the MR's own title/description rewritten in place. Pass only what changed. A title update keeps the `Draft:` prefix while the MR is a draft, so it never promotes the MR as a side effect.
 ```bash
 gl_iid {prNumber}
-DRAFT=$(glab api "projects/$(gl_project)/merge_requests/{prNumber}" | jq '.draft // false')
+DRAFT=$(gl_get "projects/$(gl_project)/merge_requests/{prNumber}" '.draft // false')
 jq -n --arg t "<title>" --argjson draft "$DRAFT" \
   "$GL_JQ_DEFS"'{title: (if $draft and ($t | test(gl_draft_re; "i") | not) then "Draft: " + $t else $t end)}' \
   | gl_write PUT "projects/$(gl_project)/merge_requests/{prNumber}" >/dev/null
@@ -534,8 +549,8 @@ Commit the images to a dedicated slash-free evidence branch (never the MR's own 
 ```bash
 gl_iid {prNumber}
 P=$(gl_project)
-WEB=$(glab api "projects/$P" | jq -r '.web_url')
-DEFAULT_BRANCH=$(glab api "projects/$P" | jq -r '.default_branch')
+WEB=$(gl_get "projects/$P" -r '.web_url')
+DEFAULT_BRANCH=$(gl_get "projects/$P" -r '.default_branch')
 EVIDENCE_BRANCH="qa-evidence-{slug}"
 glab api "projects/$P/repository/branches/${EVIDENCE_BRANCH}" >/dev/null 2>&1 ||
   jq -n --arg b "$EVIDENCE_BRANCH" --arg r "$DEFAULT_BRANCH" '{branch: $b, ref: $r}' \
@@ -562,7 +577,7 @@ rm -f "$EV_TMP" "$EV_TMP.json"
 { cat <body-file>; printf '%s\n' "$BODY_IMAGES"; } > "$EV_TMP.body"
 NOTE_ID=$(jq -n --rawfile b "$EV_TMP.body" '{body: $b}' | gl_write POST "projects/$P/merge_requests/{prNumber}/notes" | jq -r '.id')
 rm -f "$EV_TMP.body"
-glab api "projects/$P/merge_requests/{prNumber}" | jq -r --arg n "$NOTE_ID" '"\(.web_url)#note_\($n)"'
+gl_get "projects/$P/merge_requests/{prNumber}" -r --arg n "$NOTE_ID" '"\(.web_url)#note_\($n)"'
 ```
 Fallbacks: when the evidence branch cannot be created or written (no Developer access, a protected-branch rule matching `qa-evidence-*`), post the note with the local artifact paths instead and say inline rendering is unavailable. Never store evidence on the MR's own branch, and never force-push.
 
@@ -607,8 +622,8 @@ gl_review() {
   gl_iid "$1" || return 1
   p=$(gl_project) || return 1
   # Become a listed reviewer first: get-pr trusts verdict markers only from reviewers/approvers.
-  me=$(glab api user | jq '.id') || return 1
-  ids=$(glab api "projects/$p/merge_requests/$1" | jq -c --argjson u "$me" \
+  me=$(gl_get user '.id') || return 1
+  ids=$(gl_get "projects/$p/merge_requests/$1" -c --argjson u "$me" \
     '[(.reviewers // [])[].id] | if index([$u]) then . else . + [$u] end') || return 1
   jq -n --argjson ids "$ids" '{reviewer_ids: $ids}' | gl_write PUT "projects/$p/merge_requests/$1" >/dev/null || return 1
   case "$2" in
@@ -649,7 +664,7 @@ gl_iid {prNumber}
 glab api "projects/$(gl_project)/merge_requests/{prNumber}" \
   | jq "$GL_JQ_DEFS"'{title: (.title | sub(gl_draft_re; ""; "i"))}' \
   | gl_write PUT "projects/$(gl_project)/merge_requests/{prNumber}" >/dev/null
-glab api "projects/$(gl_project)/merge_requests/{prNumber}" | jq -e '(.draft // false) == false' >/dev/null
+gl_get "projects/$(gl_project)/merge_requests/{prNumber}" -e '(.draft // false) == false' >/dev/null
 ```
 
 #### get-pr-checks
@@ -659,7 +674,7 @@ gl_pr_checks() {
   local p head pid pp jobs bridges
   gl_iid "$1" || return 1
   p=$(gl_project) || return 1
-  head=$(glab api "projects/$p/merge_requests/$1" | jq -c '.head_pipeline // {}') || return 1
+  head=$(gl_get "projects/$p/merge_requests/$1" -c '.head_pipeline // {}') || return 1
   pid=$(printf '%s' "$head" | jq -r '.id // empty')
   [ -n "$pid" ] || { echo '[]'; return 0; }
   # A fork MR's pipeline usually runs in the source project: address the pipeline's own project.
@@ -676,7 +691,7 @@ A failed job marked `allow_failure: true` reports `NEUTRAL` (bucket `pass`); a m
 #### get-required-checks
 GitLab has no per-branch list of required checks. The merge rule is the project's "Pipelines must succeed" setting, which a failing non-`allow_failure` job violates. This operation therefore prints no check names — the contract's "unreadable" case — and every check **get-pr-checks** reports counts as required. Allow-failure jobs are already `NEUTRAL` there, so they never block. Print the project setting for the record:
 ```bash
-glab api "projects/$(gl_project)" | jq -r '"only_allow_merge_if_pipeline_succeeds=\(.only_allow_merge_if_pipeline_succeeds)"' >&2
+gl_get "projects/$(gl_project)" -r '"only_allow_merge_if_pipeline_succeeds=\(.only_allow_merge_if_pipeline_succeeds)"' >&2
 ```
 External status checks (Ultimate) are not included; a team that uses them extends this operation in its copy.
 
@@ -687,7 +702,7 @@ Comment handle → body, author, URL. Conversation notes and inline diff notes s
 `{prNumber}` → every inline diff note on the MR (file, line, author, body), with GitLab's thread `resolved` state — which GitHub's REST API does not expose. `reply_to` is the handle of the first note in the thread for replies, `null` for the note that opened it.
 ```bash
 gl_iid {prNumber}
-WEB=$(glab api "projects/$(gl_project)/merge_requests/{prNumber}" | jq -r '.web_url')
+WEB=$(gl_get "projects/$(gl_project)/merge_requests/{prNumber}" -r '.web_url')
 gl_list "projects/$(gl_project)/merge_requests/{prNumber}/discussions" \
   | jq --arg k "merge_requests/{prNumber}" --arg w "$WEB" '[.[] | .notes as $ns | $ns[] | select(.type == "DiffNote")
     | {id: "\($k)/\(.id)", user: .author.username, path: (.position.new_path // .position.old_path),
@@ -702,9 +717,9 @@ CI status for an *MR* comes from **get-pr-checks** above. These operations addre
 #### list-runs
 Branch (or head SHA) → recent pipelines with `databaseId`, `workflowName` (the pipeline source, e.g. `push`, `merge_request_event`), `status` (`queued`/`in_progress`/`completed`), and `conclusion` (`success`/`failure`/`cancelled`/`skipped`/`action_required`).
 ```bash
-glab api "projects/$(gl_project)/pipelines?ref=$(printf '%s' "{branch}" | jq -sRr @uri)&order_by=id&sort=desc&per_page=20" \
-  | jq "$GL_JQ_DEFS"'map(gl_run)'
-glab api "projects/$(gl_project)/pipelines?sha={headSha}&order_by=id&sort=desc&per_page=20" | jq "$GL_JQ_DEFS"'map(gl_run)'
+gl_get "projects/$(gl_project)/pipelines?ref=$(printf '%s' "{branch}" | jq -sRr @uri)&order_by=id&sort=desc&per_page=20" \
+  "$GL_JQ_DEFS"'map(gl_run)'
+gl_get "projects/$(gl_project)/pipelines?sha={headSha}&order_by=id&sort=desc&per_page=20" "$GL_JQ_DEFS"'map(gl_run)'
 ```
 
 #### get-run
@@ -714,7 +729,7 @@ gl_iid {runId}
 P=$(gl_project)
 JOBS=$(mktemp)
 gl_list "projects/$P/pipelines/{runId}/jobs" > "$JOBS"
-glab api "projects/$P/pipelines/{runId}" | jq --slurpfile jobs "$JOBS" "$GL_JQ_DEFS"'gl_run + {jobs: [$jobs[0][]
+gl_get "projects/$P/pipelines/{runId}" --slurpfile jobs "$JOBS" "$GL_JQ_DEFS"'gl_run + {jobs: [$jobs[0][]
   | {databaseId: .id, name, stage, url: .web_url, allowFailure: .allow_failure} + gl_run_status]}'
 rm -f "$JOBS"
 ```
@@ -735,7 +750,8 @@ gl_list "projects/$P/pipelines/{runId}/jobs?scope=failed" | jq -r '.[] | "\(.id)
 Pipeline id → retry only its failed and canceled jobs. Use to disambiguate flaky failures before changing any code.
 ```bash
 gl_iid {runId}
-glab api -X POST "projects/$(gl_project)/pipelines/{runId}/retry" | jq "$GL_JQ_DEFS"'gl_run'
+RETRY=$(glab api -X POST "projects/$(gl_project)/pipelines/{runId}/retry") || { echo "GitLab refused the retry of pipeline {runId}" >&2; exit 1; }
+printf '%s' "$RETRY" | jq "$GL_JQ_DEFS"'gl_run'
 ```
 
 #### watch-run
@@ -744,8 +760,9 @@ Pipeline id → block until the pipeline finishes; exit non-zero unless it succe
 gl_iid {runId}
 DEADLINE=$(( $(date +%s) + ${CI_MAX_WAIT_MINUTES:-40} * 60 ))
 while :; do
-  RUN=$(glab api "projects/$(gl_project)/pipelines/{runId}" | jq -c "$GL_JQ_DEFS"'gl_run')
-  [ "$(printf '%s' "$RUN" | jq -r .status)" = completed ] && break
+  # A failed poll is retried until the deadline, never read as a finished pipeline.
+  RUN=$(gl_get "projects/$(gl_project)/pipelines/{runId}" -c "$GL_JQ_DEFS"'gl_run') || RUN='{}'
+  [ "$(printf '%s' "$RUN" | jq -r '.status // empty')" = completed ] && break
   [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "Pipeline {runId} still running after the wait budget" >&2; exit 2; }
   sleep 30
 done
