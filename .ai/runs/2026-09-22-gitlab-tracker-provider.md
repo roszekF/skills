@@ -59,9 +59,9 @@ Let `om-setup-agent-pipeline` install a ready-to-use `.ai/trackers/gitlab.md` th
 
 ### Phase 2: Setup and skill integration
 
-- [ ] 2.1 Teach setup and its interview guidance that gitlab is a shipped stand-alone provider
-- [ ] 2.2 Let om-followup-issue-from-pr parse GitLab merge-request links
-- [ ] 2.3 Extend the lint tracker-abstraction gate to glab
+- [x] 2.1 Teach setup and its interview guidance that gitlab is a shipped stand-alone provider — caea65a
+- [x] 2.2 Let om-followup-issue-from-pr parse GitLab merge-request links — 3f40816
+- [x] 2.3 Extend the lint tracker-abstraction gate to glab — e3e30cf
 
 ### Phase 3: Documentation
 
